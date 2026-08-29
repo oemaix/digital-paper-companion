@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4.45", features = ["serde"] }
-dpt-core = { version = "0.1.0", path = "../crates/dpt-core" }
+dpt-core.workspace = true
 futures-util = "0.3.34"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 rand = "0.8"
