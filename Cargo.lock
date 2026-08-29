@@ -1017,7 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "dpt-app"
-version = "0.1.0"
+version = "0.2.0-pre.1"
 dependencies = [
  "chacha20poly1305",
  "chrono",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "dpt-core"
-version = "0.1.0"
+version = "0.2.0-pre.1"
 dependencies = [
  "aes",
  "async-trait",

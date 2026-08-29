@@ -1,7 +1,7 @@
 {
   "name": "digital-paper-companion",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0-pre.1",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

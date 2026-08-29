@@ -66,9 +66,9 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Digital Paper Companion v__VERSION__
-          releaseBody: See the assets to download and install this version.
-          releaseDraft: true
-          prerelease: false
+          releaseBody: Phase 2 pre-release — folder sync and first installers. Not signed.
+          releaseDraft: false
+          prerelease: true
           args: ${{ matrix.args }}
 
       - uses: actions/upload-artifact@v4

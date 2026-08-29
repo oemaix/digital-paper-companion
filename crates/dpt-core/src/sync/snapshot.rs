@@ -297,9 +297,10 @@ mod tests {
 
     #[test]
     fn nfd_local_names_match_nfc_keys() {
-        // "ü" as NFD (u + combining diaeresis) must normalize to NFC.
+        // "ü" as NFD (u + combining diaeresis) must normalize to the same
+        // map key as NFC (and, on Windows, the case-folded form).
         let nfd = "u\u{0308}ber.pdf";
-        assert_eq!(norm_key(nfd), "über.pdf");
+        assert_eq!(norm_key(nfd), norm_key("über.pdf"));
     }
 
     #[test]
@@ -328,11 +329,15 @@ mod tests {
 
         let view = walk_local(dir.path(), &HashMap::new()).unwrap();
         assert_eq!(view.files.len(), 2);
-        assert!(view.files.contains_key("a.pdf"));
-        assert_eq!(view.files["Papers/b.PDF"].size, 2);
+        assert!(view.files.contains_key(&norm_key("a.pdf")));
+        // Map keys are `norm_key` (case-folded on Windows); the stored
+        // relpath keeps the on-disk spelling.
+        let mixed = &view.files[&norm_key("Papers/b.PDF")];
+        assert_eq!(mixed.size, 2);
+        assert_eq!(mixed.relpath.to_ascii_lowercase(), "papers/b.pdf");
         assert_eq!(
-            view.folders.keys().collect::<Vec<_>>(),
-            vec!["Papers", "Papers/Deep"]
+            view.folders.keys().cloned().collect::<Vec<_>>(),
+            vec![norm_key("Papers"), norm_key("Papers/Deep")]
         );
     }
 }
