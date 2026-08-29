@@ -1,0 +1,48 @@
+# Docker-based development environment (alternative to shell.nix).
+#
+#   docker compose build                      # build the dev image once
+#   docker compose run --rm dev               # interactive shell
+#   docker compose run --rm dev npm install   # first time
+#   docker compose run --rm dev npm run check # lint + tests
+#   docker compose run --rm dev npm run dev   # GUI via host X11, see README
+#
+# `target/` and `node_modules/` live in named volumes so container builds
+# (Debian/glibc) never collide with host builds (e.g. from nix-shell).
+
+services:
+  dev:
+    build:
+      context: .
+      args:
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+    image: digital-paper-companion-dev
+    working_dir: /workspace
+    # Default "root" targets ROOTLESS Docker, where container root is mapped
+    # to your host user (files created in the bind mount stay yours, and the
+    # in-container "dev" user would have no write access at all).
+    # On classic rootful Docker run as the unprivileged user instead:
+    #   DPC_CONTAINER_USER=dev docker compose run --rm dev
+    user: "${DPC_CONTAINER_USER:-root}"
+    # Host networking: Vite dev server on :1420 and, later, mDNS discovery
+    # and device traffic work without port mapping.
+    network_mode: host
+    ipc: host
+    environment:
+      DISPLAY: "${DISPLAY:-:0}"
+      WAYLAND_DISPLAY: "${WAYLAND_DISPLAY:-}"
+    volumes:
+      - .:/workspace
+      - cargo-registry:/usr/local/cargo/registry
+      - target:/workspace/target
+      - node-modules:/workspace/node_modules
+      # X11 socket for running the Tauri window from inside the container
+      # (requires `xhost +local:` on the host; see README).
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    stdin_open: true
+    tty: true
+
+volumes:
+  cargo-registry:
+  target:
+  node-modules:

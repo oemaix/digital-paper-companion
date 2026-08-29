@@ -32,7 +32,7 @@ Protocol references (`§n`) refer to
 | FR-REG-3 | P1 | On success the app MUST persist the client ID, the RSA-2048 private key and the device certificate from message M5, per the storage rules of [07-data-and-security.md](07-data-and-security.md). |
 | FR-REG-4 | P1 | The app MUST establish sessions per §5 (nonce → RSA-PKCS#1-v1.5-SHA256 signature → `Credentials` cookie), tolerate the device's non-RFC `Set-Cookie` format, and refresh the session automatically when the device invalidates it. |
 | FR-REG-5 | P2 | The app SHOULD offer "Forget this device", which deletes the stored credentials, certificate and per-device settings after confirmation. |
-| FR-REG-6 | P2 | The app SHOULD import existing credentials from Sony's official app or `dptrp1` (`deviceid.dat` / `privatekey.dat`), so already-paired users don't need to re-pair. |
+| FR-REG-6 | P2 | The app SHOULD import existing credentials from Sony's official app or `dptrp1` (`deviceid.dat` / `privatekey.dat`), so already-paired users don't need to re-pair. Default search locations per [07-data-and-security.md](07-data-and-security.md) §2; a manual file picker is the fallback. |
 
 ## 3. Device settings and status (SET)
 

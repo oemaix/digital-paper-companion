@@ -1,27 +1,49 @@
 @import "tailwindcss";
 
-/* Design tokens per docs/05-ui-ux-specification.md §5.1 */
+/* Design tokens per docs/05-ui-ux-specification.md §5.1.
+   Monochrome palette matching the e-ink device; status is never communicated
+   by hue, only by shape, weight and text. Sharp corners throughout (no
+   border radii). */
 @theme {
-  --color-bg: #fafaf8;
-  --color-surface: #ffffff;
-  --color-border: #e4e4e0;
-  --color-text: #1c1e21;
-  --color-text-secondary: #6b6f76;
-  --color-accent: #2563eb;
-  --color-success: #16a34a;
-  --color-warning: #d97706;
-  --color-danger: #dc2626;
+  --color-bg: #ffffff;
+  --color-surface: #f4f4f3;
+  --color-border: #dcdcd9;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #666663;
+  --color-accent: #1a1a1a;
+  --color-accent-foreground: #ffffff;
 }
 
-/* Dark theme (follows OS setting; manual override lands with settings UI) */
+:root {
+  color-scheme: light;
+}
+
+/* Dark theme: a soft charcoal inversion (not pure black-on-white, to reduce
+   eye strain and halation). Follows the OS by default; `data-theme` on
+   <html> (set from settings) forces light/dark (docs/05 §5.1).
+   `color-scheme: dark` makes native controls — the <select> popup,
+   scrollbars — render dark instead of a white block. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #1c1c1e;
+  --color-surface: #262628;
+  --color-border: #3a3a3d;
+  --color-text: #e8e8e6;
+  --color-text-secondary: #9a9a97;
+  --color-accent: #e8e8e6;
+  --color-accent-foreground: #1c1c1e;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --color-bg: #111315;
-    --color-surface: #1a1d1f;
-    --color-border: #2a2e31;
-    --color-text: #ecedee;
-    --color-text-secondary: #9ba1a6;
-    --color-accent: #3b82f6;
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    color-scheme: dark;
+    --color-bg: #1c1c1e;
+    --color-surface: #262628;
+    --color-border: #3a3a3d;
+    --color-text: #e8e8e6;
+    --color-text-secondary: #9a9a97;
+    --color-accent: #e8e8e6;
+    --color-accent-foreground: #1c1c1e;
   }
 }
 

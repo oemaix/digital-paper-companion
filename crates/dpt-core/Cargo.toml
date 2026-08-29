@@ -7,21 +7,33 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-aes = "0.9.3"
-base64 = "0.23.1"
-cbc = { version = "0.2.1", features = ["alloc"] }
-chrono = { version = "0.4.45", features = ["serde"] }
-hmac = "0.13.0"
-mdns-sd = "0.21.0"
-num-bigint = "0.5.1"
-pbkdf2 = "0.13.0"
-rand = "0.10.2"
-reqwest = { version = "0.13.4", features = ["json", "stream", "multipart"] }
-rsa = { version = "0.9.10", features = ["sha2"] }
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-sha2 = "0.11.0"
-thiserror = "2.0.20"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
-tracing = "0.1.44"
-uuid = { version = "1.26.0", features = ["v4", "serde"] }
+# Crypto stack pinned to a mutually compatible generation (digest 0.10 /
+# cipher 0.4 / rand_core 0.6). rsa 0.9 (latest) requires rand_core 0.6, so
+# the whole hand-written registration handshake stays on matching versions.
+aes = "0.8"
+cbc = "0.1"
+cipher = { version = "0.4", features = ["block-padding", "alloc"] }
+hmac = "0.12"
+pbkdf2 = "0.12"
+rand = "0.8"
+rsa = { version = "0.9", features = ["sha2"] }
+sha2 = "0.10"
+num-bigint = "0.4"
+
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+mdns-sd = "0.21"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# HTTPS with a custom certificate-pinning verifier (docs/07 §3).
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "multipart", "rustls"] }
+rustls = "0.23"
+rustls-pemfile = "2"
+
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"

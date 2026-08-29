@@ -33,5 +33,9 @@ pub mod usb;
 
 pub use error::Error;
 
+/// Re-exported so downstream crates (dpt-app) use the exact same reqwest
+/// version for streaming response bodies.
+pub use reqwest;
+
 /// Crate-wide result type.
 pub type Result<T> = std::result::Result<T, Error>;

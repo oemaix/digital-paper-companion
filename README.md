@@ -18,23 +18,48 @@ Built with **Rust** and **Tauri 2**; runs on Windows, macOS and Linux.
 
 ## Development
 
-### Prerequisites
+Two interchangeable dev environments are provided; pick one.
 
-- **NixOS / Nix users:** everything is provided by the dev shell —
-  `nix-shell` in the repository root.
-- **Other Linux:** Rust (stable), Node.js ≥ 22, plus the
-  [Tauri 2 Linux prerequisites](https://tauri.app/start/prerequisites/)
-  (WebKitGTK 4.1, GTK 3, libsoup 3, OpenSSL, pkg-config).
-- **Windows / macOS:** Rust (stable), Node.js ≥ 22 and the platform
-  prerequisites from the Tauri docs.
+### Option A: Docker (recommended)
 
-### Getting started
+Requires Docker with the Compose plugin. The image contains Rust, Node 22
+and all Tauri Linux dependencies on a Debian base — identical for every
+contributor and to CI. `target/` and `node_modules/` live in named volumes,
+so container builds never collide with host builds.
 
 ```bash
-nix-shell              # NixOS/Nix only; provides rustc, cargo, node, npm
+docker compose build                       # once (and after Dockerfile changes)
+docker compose run --rm dev npm install    # once
+docker compose run --rm dev                # interactive shell
+docker compose run --rm dev npm run check  # lint + typecheck + tests
+docker compose run --rm dev npm run build  # release bundles
+```
+
+Running the GUI (`npm run dev`) from inside the container works on an X11
+host after allowing local connections once (`xhost +local:`); on Wayland,
+prefer running the GUI via Option B and use the container for
+building/testing. Cursor/VS Code users can instead open the repo as a
+**Dev Container** (configuration in `.devcontainer/`), which uses the same
+compose service.
+
+Note on permissions: the compose service runs as container root by default,
+which is correct for **rootless Docker** (container root = your host user).
+On classic rootful Docker, run as the unprivileged user instead:
+`DPC_CONTAINER_USER=dev docker compose run --rm dev`.
+
+### Option B: Nix shell (NixOS hosts)
+
+```bash
+nix-shell              # provides rustc, cargo, node, npm + Tauri libs
 npm install            # frontend dependencies
 npm run dev            # full app: vite dev server + tauri window
 ```
+
+### Manual setup
+
+Rust (stable), Node.js ≥ 22, plus the
+[Tauri 2 prerequisites](https://tauri.app/start/prerequisites/) for your
+platform (on Linux: WebKitGTK 4.1, GTK 3, libsoup 3, OpenSSL, pkg-config).
 
 Useful scripts (see `package.json`):
 

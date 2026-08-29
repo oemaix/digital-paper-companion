@@ -50,10 +50,24 @@ whenever reachable.
 - Credentials never appear in logs, error messages, IPC payloads to the
   webview, or crash reports. The webview receives only the device serial
   and display name.
-- **Import (FR-REG-6):** reads Sony's/`dptrp1`'s `deviceid.dat` +
-  `privatekey.dat`, validates the key parses and authenticates against the
-  device, then stores through the normal path. The source files are left
-  untouched; the UI suggests deleting them.
+- **Import (FR-REG-6):** reads Sony's/`dptrp1`'s `deviceid.dat` (client ID,
+  plain text) + `privatekey.dat` (RSA private key, PEM), validates the key
+  parses and authenticates against the device, then stores through the
+  normal path. The source files are left untouched; the UI suggests
+  deleting them.
+
+  Default search locations (scanned recursively, since Sony's app may nest
+  the files in per-device subfolders; if several credential sets are found,
+  the user picks one — a file picker remains available as fallback):
+
+  | Origin | Location |
+  |---|---|
+  | Sony Digital Paper App, Windows | `%APPDATA%\Sony Corporation\Digital Paper App\` (= `C:\Users\{user}\AppData\Roaming\...`) |
+  | Sony Digital Paper App, macOS | `~/Library/Application Support/Sony Corporation/Digital Paper App/` |
+  | `dpt-rp1-py` (all platforms) | `~/.config/dpt/deviceid.dat` and `~/.config/dpt/privatekey.dat` |
+
+  There is no Sony location on Linux (the official app was never released
+  for Linux); only the `dpt-rp1-py` path applies there.
 
 ## 3. TLS policy (NFR-SEC-2)
 

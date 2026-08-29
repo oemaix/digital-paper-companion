@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Digital Paper Companion app icon: monochrome e-reader, sharp corners,
+       thin bezel; the small horizontal slot in the top bezel echoes the
+       DPT's top home button. Source of truth; regenerate platform icons:
+       rsvg-convert -w 1024 -h 1024 assets/app-icon.svg -o /tmp/icon.png
+       npm run tauri icon /tmp/icon.png -->
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <!-- device body -->
+  <rect x="240" y="128" width="544" height="768" fill="#000000"/>
+  <!-- home button slot in the top bezel (like the DPT's) -->
+  <rect x="476" y="147" width="72" height="10" fill="#ffffff"/>
+  <!-- screen (thin 32 px bezel) -->
+  <rect x="272" y="176" width="480" height="688" fill="#ffffff"/>
+  <!-- page content: title + text lines + handwriting stroke -->
+  <rect x="320" y="240" width="240" height="32" fill="#000000"/>
+  <rect x="320" y="326" width="384" height="16" fill="#000000"/>
+  <rect x="320" y="376" width="384" height="16" fill="#000000"/>
+  <rect x="320" y="426" width="312" height="16" fill="#000000"/>
+  <rect x="320" y="476" width="384" height="16" fill="#000000"/>
+  <rect x="320" y="526" width="216" height="16" fill="#000000"/>
+  <path d="M320 744 C 384 684, 432 784, 496 724 S 624 704, 704 744"
+        fill="none" stroke="#000000" stroke-width="16" stroke-linecap="square"/>
+</svg>

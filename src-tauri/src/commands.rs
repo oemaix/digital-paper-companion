@@ -1,18 +1,740 @@
-//! IPC command handlers (contract: docs/04 §5.2).
+//! IPC commands exposed to the frontend (docs/04 §5.2).
 //!
-//! Skeleton: two smoke-test commands proving the frontend↔backend bridge.
-//! The real command set (discovery, pairing, entries, transfers, sync, …)
-//! lands with the corresponding features.
+//! Commands validate, orchestrate `dpt-core` calls and map errors to
+//! [`AppError`]; no protocol logic lives here.
 
-/// Returns the application version (used by the frontend footer/about box).
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use tauri::{Manager, State};
+use tauri_plugin_opener::OpenerExt;
+
+use dpt_core::client::DeviceClient;
+use dpt_core::discovery;
+use dpt_core::model::{BatteryStatus, DeviceAddr, DeviceInfo, Entry, StorageStatus};
+
+use crate::error::{AppError, CmdResult};
+use crate::state::{AppState, ConnectionPayload, DeviceContext, PendingPairing};
+use crate::stores::{KnownDevice, Settings};
+use crate::transfers::{self, JobKind, JobSnapshot};
+
+type S<'a> = State<'a, Arc<AppState>>;
+
+// ---- app ------------------------------------------------------------------
+
 #[tauri::command]
 pub fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Connection state placeholder until the connection supervisor exists
-/// (FR-CONN-5). Values will follow docs/04 §5.1 `ConnectionState`.
 #[tauri::command]
-pub fn connection_state() -> String {
-    "disconnected".to_string()
+pub fn get_settings(state: S<'_>) -> Settings {
+    state.stores.load_settings()
+}
+
+#[tauri::command]
+pub fn set_theme(state: S<'_>, theme: String) -> CmdResult<()> {
+    let mut settings = state.stores.load_settings();
+    settings.theme = theme;
+    state.stores.save_settings(&settings)
+}
+
+// ---- discovery & connection -------------------------------------------------
+
+#[tauri::command]
+pub async fn connection_state(state: S<'_>) -> CmdResult<ConnectionPayload> {
+    Ok(state.connection_payload().await)
+}
+
+/// A device found on the network, enriched with its identity so the UI can
+/// deduplicate by serial and hide/label already-paired/connected devices
+/// (FR-CONN-1/7). The serial is read from the unauthenticated
+/// `GET /register/information` endpoint, so identity is known *before*
+/// pairing.
+#[derive(Serialize)]
+pub struct ScannedDevice {
+    pub address: String,
+    pub name: String,
+    pub port: u16,
+    pub serial: Option<String>,
+    pub model: Option<String>,
+    pub paired: bool,
+    pub connected: bool,
+}
+
+/// Browses mDNS for up to `seconds` (default 5), probes each result for its
+/// serial, deduplicates by serial and flags paired/connected devices
+/// (FR-CONN-1/7).
+#[tauri::command]
+pub async fn discover_devices(state: S<'_>, seconds: Option<u64>) -> CmdResult<Vec<ScannedDevice>> {
+    let timeout = Duration::from_secs(seconds.unwrap_or(5).clamp(1, 60));
+    let found = discovery::discover(timeout).await?;
+
+    let known: std::collections::HashSet<String> = state
+        .stores
+        .load_devices()
+        .into_iter()
+        .map(|d| d.serial)
+        .collect();
+    let connected_serial = state.connection_payload().await.serial;
+
+    // Probe each address (short timeout) to learn its serial. Probes run
+    // concurrently; unreachable devices simply keep an unknown serial.
+    let probes = found.into_iter().map(|d| async move {
+        let info = tokio::time::timeout(
+            Duration::from_secs(4),
+            DeviceClient::probe(&DeviceAddr::new(d.address.clone())),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok);
+        (d, info)
+    });
+    let results = futures_util::future::join_all(probes).await;
+
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (d, info) in results {
+        let serial = info.as_ref().map(|i| i.serial_number.clone());
+        // Dedupe by serial when known, otherwise by address.
+        let key = serial.clone().unwrap_or_else(|| d.address.clone());
+        if !seen.insert(key) {
+            continue;
+        }
+        let paired = serial.as_ref().is_some_and(|s| known.contains(s));
+        let connected = serial.is_some() && serial == connected_serial;
+        out.push(ScannedDevice {
+            address: d.address,
+            name: info
+                .as_ref()
+                .and_then(|i| i.model_name.clone())
+                .unwrap_or(d.name),
+            port: d.port,
+            model: info.and_then(|i| i.model_name),
+            serial,
+            paired,
+            connected,
+        });
+    }
+    Ok(out)
+}
+
+/// Probes a manual address for a compatible device (FR-CONN-2).
+#[tauri::command]
+pub async fn probe_device(address: String) -> CmdResult<DeviceInfo> {
+    Ok(DeviceClient::probe(&DeviceAddr::new(address)).await?)
+}
+
+#[tauri::command]
+pub fn known_devices(state: S<'_>) -> Vec<KnownDevice> {
+    state.stores.load_devices()
+}
+
+/// Connects to a previously paired device (FR-CONN-3/4).
+#[tauri::command]
+pub async fn connect_known_device(
+    state: S<'_>,
+    serial: String,
+    address: Option<String>,
+) -> CmdResult<ConnectionPayload> {
+    let device = state
+        .stores
+        .load_devices()
+        .into_iter()
+        .find(|d| d.serial == serial)
+        .ok_or_else(|| AppError::new("unknown_device", "device is not paired"))?;
+    let addr_str = address
+        .or(device.last_address.clone())
+        .ok_or_else(|| AppError::new("no_address", "no known address; enter one manually"))?;
+    let credentials = state
+        .creds
+        .load(&serial)?
+        .ok_or_else(|| AppError::new("no_credentials", "no stored credentials; pair again"))?;
+    let cert_pem = state.stores.load_cert(&serial)?;
+
+    let ctx = DeviceContext {
+        serial: serial.clone(),
+        name: device.name.clone(),
+        addr: DeviceAddr::new(addr_str.clone()),
+        cert_pem,
+        credentials,
+    };
+    let app_state = state.inner().clone();
+    app_state.connect(ctx).await?;
+
+    state.stores.upsert_device(KnownDevice {
+        last_address: Some(addr_str),
+        ..device
+    })?;
+    Ok(app_state.connection_payload().await)
+}
+
+#[tauri::command]
+pub async fn disconnect_device(state: S<'_>) -> CmdResult<()> {
+    state.disconnect().await;
+    Ok(())
+}
+
+/// Removes a paired device: credentials, pinned cert and registry entry
+/// (docs/07 §2 "Forget this device").
+#[tauri::command]
+pub async fn forget_device(state: S<'_>, serial: String) -> CmdResult<()> {
+    let payload = state.connection_payload().await;
+    if payload.serial.as_deref() == Some(serial.as_str()) {
+        state.disconnect().await;
+    }
+    state.creds.delete(&serial)?;
+    state.stores.remove_device(&serial)?;
+    Ok(())
+}
+
+// ---- pairing (FR-REG-1/2/3) -------------------------------------------------
+
+/// Starts the pairing handshake; on success the device shows a PIN.
+#[tauri::command]
+pub async fn start_pairing(state: S<'_>, address: String) -> CmdResult<DeviceInfo> {
+    let addr = DeviceAddr::new(address);
+    let info = DeviceClient::probe(&addr).await?;
+    let pending = DeviceClient::register(&addr)?.begin().await?;
+    *state.pending.lock().await = Some(PendingPairing {
+        pin: pending,
+        addr,
+        info: info.clone(),
+    });
+    Ok(info)
+}
+
+/// Completes pairing with the on-device PIN, persists credentials and the
+/// pinned certificate, then connects.
+#[tauri::command]
+pub async fn submit_pairing_pin(state: S<'_>, pin: String) -> CmdResult<ConnectionPayload> {
+    let pending = state
+        .pending
+        .lock()
+        .await
+        .take()
+        .ok_or_else(|| AppError::new("no_pairing", "no pairing in progress"))?;
+
+    let registration = pending.pin.submit_pin(pin.trim()).await?;
+
+    let serial = pending.info.serial_number.clone();
+    let name = pending
+        .info
+        .model_name
+        .clone()
+        .unwrap_or_else(|| "Digital Paper".to_string());
+
+    state.creds.save(&serial, &registration.credentials)?;
+    state
+        .stores
+        .save_cert(&serial, &registration.device_cert_pem)?;
+    state.stores.upsert_device(KnownDevice {
+        serial: serial.clone(),
+        name: name.clone(),
+        model: pending.info.model_name.clone(),
+        last_address: Some(pending.addr.0.clone()),
+    })?;
+
+    let ctx = DeviceContext {
+        serial,
+        name,
+        addr: pending.addr,
+        cert_pem: registration.device_cert_pem,
+        credentials: registration.credentials,
+    };
+    let app_state = state.inner().clone();
+    app_state.connect(ctx).await?;
+    Ok(app_state.connection_payload().await)
+}
+
+#[tauri::command]
+pub async fn cancel_pairing(state: S<'_>) -> CmdResult<()> {
+    state.pending.lock().await.take();
+    Ok(())
+}
+
+// ---- entries (FR-BRW-*) -----------------------------------------------------
+
+/// Returns the full entry list, from cache unless `refresh` is set.
+#[tauri::command]
+pub async fn list_entries(state: S<'_>, refresh: Option<bool>) -> CmdResult<Vec<Entry>> {
+    if !refresh.unwrap_or(false) {
+        if let Some(cached) = state.entries().await {
+            return Ok(cached);
+        }
+    }
+    let client = state.require_client().await?;
+    let entries = client.list_all_entries().await?;
+    state.set_entries(entries.clone()).await;
+    Ok(entries)
+}
+
+async fn cached_entries(state: &Arc<AppState>) -> CmdResult<Vec<Entry>> {
+    if let Some(cached) = state.entries().await {
+        return Ok(cached);
+    }
+    let client = state.require_client().await?;
+    let entries = client.list_all_entries().await?;
+    state.set_entries(entries.clone()).await;
+    Ok(entries)
+}
+
+fn find_entry<'e>(entries: &'e [Entry], id: &str) -> CmdResult<&'e Entry> {
+    entries
+        .iter()
+        .find(|e| e.entry_id == id)
+        .ok_or_else(|| AppError::new("not_found", "entry not found; refresh the library"))
+}
+
+/// Resolves a device path to its entry (used for folder ids not present in
+/// the flat listing, e.g. the `Document` root).
+#[tauri::command]
+pub async fn resolve_folder(state: S<'_>, path: String) -> CmdResult<Entry> {
+    let client = state.require_client().await?;
+    Ok(client.resolve_path(&path).await?)
+}
+
+#[tauri::command]
+pub async fn create_remote_folder(
+    state: S<'_>,
+    parent_folder_id: String,
+    name: String,
+) -> CmdResult<()> {
+    let client = state.require_client().await?;
+    client.create_folder(&parent_folder_id, &name).await?;
+    state.invalidate_entries().await;
+    Ok(())
+}
+
+/// Deletes documents/folders by id (irreversible on the device; the UI
+/// confirms first, docs/05 §4.3).
+#[tauri::command]
+pub async fn delete_entries(state: S<'_>, ids: Vec<String>) -> CmdResult<()> {
+    let entries = cached_entries(state.inner()).await?;
+    let client = state.require_client().await?;
+    for id in &ids {
+        let entry = find_entry(&entries, id)?;
+        if entry.is_folder() {
+            client.delete_folder(id).await?;
+        } else {
+            client.delete_document(id).await?;
+        }
+    }
+    state.invalidate_entries().await;
+    Ok(())
+}
+
+/// Renames a document (folder rename is not supported by the protocol).
+#[tauri::command]
+pub async fn rename_entry(state: S<'_>, id: String, new_name: String) -> CmdResult<()> {
+    let entries = cached_entries(state.inner()).await?;
+    let entry = find_entry(&entries, &id)?;
+    if entry.is_folder() {
+        return Err(AppError::new(
+            "unsupported",
+            "folders cannot be renamed by the device API",
+        ));
+    }
+    let parent = entry
+        .parent_folder_id
+        .clone()
+        .ok_or_else(|| AppError::new("protocol", "entry has no parent folder"))?;
+    let client = state.require_client().await?;
+    client.move_document(&id, &parent, Some(&new_name)).await?;
+    state.invalidate_entries().await;
+    Ok(())
+}
+
+/// Moves documents into another folder.
+#[tauri::command]
+pub async fn move_entries(
+    state: S<'_>,
+    ids: Vec<String>,
+    target_folder_id: String,
+) -> CmdResult<()> {
+    let entries = cached_entries(state.inner()).await?;
+    let client = state.require_client().await?;
+    for id in &ids {
+        let entry = find_entry(&entries, id)?;
+        if entry.is_folder() {
+            return Err(AppError::new(
+                "unsupported",
+                "moving folders is not supported by the device API",
+            ));
+        }
+        client.move_document(id, &target_folder_id, None).await?;
+    }
+    state.invalidate_entries().await;
+    Ok(())
+}
+
+/// Downloads a document into the app cache and opens it with the OS PDF
+/// viewer (FR-BRW-5).
+#[tauri::command]
+pub async fn open_entry(state: S<'_>, id: String) -> CmdResult<()> {
+    let entries = cached_entries(state.inner()).await?;
+    let entry = find_entry(&entries, &id)?.clone();
+    if entry.is_folder() {
+        return Err(AppError::new("unsupported", "cannot preview a folder"));
+    }
+    let client = state.require_client().await?;
+
+    let cache_dir = state
+        .app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| AppError::new("io", e.to_string()))?
+        .join("previews")
+        .join(&entry.entry_id);
+    tokio::fs::create_dir_all(&cache_dir).await?;
+    let target = cache_dir.join(&entry.entry_name);
+
+    let resp = client.download_response(&id).await?;
+    stream_to_file(resp, &target).await?;
+
+    state
+        .app
+        .opener()
+        .open_path(target.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::new("opener", e.to_string()))?;
+    Ok(())
+}
+
+/// Opens a document on the device screen (FR-BRW-6).
+#[tauri::command]
+pub async fn open_on_device(state: S<'_>, id: String, page: Option<u32>) -> CmdResult<()> {
+    let client = state.require_client().await?;
+    client.open_on_device(&id, page.unwrap_or(1)).await?;
+    Ok(())
+}
+
+async fn stream_to_file(resp: dpt_core::reqwest::Response, target: &Path) -> CmdResult<()> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    let tmp = target.with_extension("part");
+    let mut file = tokio::fs::File::create(&tmp).await?;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| AppError::new("network", e.to_string()))?;
+        file.write_all(&chunk).await?;
+    }
+    file.flush().await?;
+    drop(file);
+    tokio::fs::rename(&tmp, target).await?;
+    Ok(())
+}
+
+// ---- device status & settings (FR-SET-1/3) ----------------------------------
+
+#[derive(Serialize)]
+pub struct DeviceStatus {
+    pub serial: String,
+    pub model: Option<String>,
+    pub firmware: Option<String>,
+    pub mac_address: Option<String>,
+    pub battery: BatteryStatus,
+    pub storage: StorageStatus,
+}
+
+#[tauri::command]
+pub async fn device_status(state: S<'_>) -> CmdResult<DeviceStatus> {
+    let client = state.require_client().await?;
+    let info = client.device_info().await?;
+    let battery = client.battery().await?;
+    let storage = client.storage().await?;
+    let firmware = client.firmware_version().await.ok();
+    let mac_address = client.mac_address().await.ok();
+    Ok(DeviceStatus {
+        serial: info.serial_number,
+        model: info.model_name,
+        firmware,
+        mac_address,
+        battery,
+        storage,
+    })
+}
+
+/// Sets the device clock to the host's current time (FR-SET-3).
+#[tauri::command]
+pub async fn set_device_clock(state: S<'_>) -> CmdResult<()> {
+    let client = state.require_client().await?;
+    client.set_clock_now().await?;
+    Ok(())
+}
+
+// ---- transfers (FR-TRF-*) ----------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct UploadItem {
+    pub local_path: String,
+    pub file_name: String,
+    /// Set when the user chose to overwrite an existing document.
+    pub existing_doc_id: Option<String>,
+}
+
+/// Enqueues file uploads into a device folder. Conflict decisions
+/// (overwrite/keep-both/skip) are made by the frontend beforehand
+/// (FR-TRF-9); "overwrite" arrives as `existing_doc_id`.
+#[tauri::command]
+pub async fn upload_files(
+    state: S<'_>,
+    dest_folder_id: String,
+    items: Vec<UploadItem>,
+) -> CmdResult<Vec<u64>> {
+    let kinds = items
+        .into_iter()
+        .map(|item| {
+            (
+                item.file_name.clone(),
+                JobKind::Upload {
+                    local_path: PathBuf::from(item.local_path),
+                    file_name: item.file_name,
+                    dest_folder_id: dest_folder_id.clone(),
+                    existing_doc_id: item.existing_doc_id,
+                },
+            )
+        })
+        .collect();
+    Ok(transfers::enqueue(state.inner(), kinds).await)
+}
+
+/// Uploads a local folder recursively: mirrors the directory structure on
+/// the device and enqueues every PDF (FR-TRF-4). Existing documents with
+/// the same path are overwritten.
+#[tauri::command]
+pub async fn upload_folder(
+    state: S<'_>,
+    dest_folder_id: String,
+    dest_folder_path: String,
+    local_dir: String,
+) -> CmdResult<Vec<u64>> {
+    let client = state.require_client().await?;
+    let local_root = PathBuf::from(&local_dir);
+    let root_name = local_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| AppError::new("io", "invalid folder path"))?
+        .to_string();
+
+    // Collect relative dirs and PDF files, breadth-first for parent-first
+    // folder creation (protocol §7.3.6).
+    let mut rel_dirs: Vec<PathBuf> = vec![PathBuf::new()];
+    let mut files: Vec<(PathBuf, PathBuf)> = Vec::new(); // (abs, rel)
+    let mut queue = vec![local_root.clone()];
+    while let Some(dir) = queue.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let rel = path.strip_prefix(&local_root).unwrap().to_path_buf();
+            if path.is_dir() {
+                rel_dirs.push(rel);
+                queue.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+            {
+                files.push((path, rel));
+            }
+        }
+    }
+    rel_dirs.sort_by_key(|d| d.components().count());
+
+    // Ensure remote folders exist; map rel dir -> folder id.
+    let mut folder_ids: std::collections::HashMap<PathBuf, String> =
+        std::collections::HashMap::new();
+    for rel in &rel_dirs {
+        let remote_path = join_remote(&dest_folder_path, &root_name, rel);
+        let id = match client.resolve_path(&remote_path).await {
+            Ok(entry) if entry.is_folder() => entry.entry_id,
+            Ok(_) => {
+                return Err(AppError::new(
+                    "conflict",
+                    format!("'{remote_path}' exists on the device as a document"),
+                ))
+            }
+            Err(_) => {
+                let (parent_id, name) = match rel.parent() {
+                    Some(p) if p.as_os_str().is_empty() && rel.as_os_str().is_empty() => {
+                        unreachable!()
+                    }
+                    _ if rel.as_os_str().is_empty() => {
+                        (dest_folder_id.clone(), root_name.clone())
+                    }
+                    Some(parent) => {
+                        let pid = folder_ids
+                            .get(parent)
+                            .cloned()
+                            .ok_or_else(|| AppError::new("io", "folder order error"))?;
+                        let name = rel
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        (pid, name)
+                    }
+                    None => (dest_folder_id.clone(), root_name.clone()),
+                };
+                client.create_folder(&parent_id, &name).await?;
+                client.resolve_path(&remote_path).await?.entry_id
+            }
+        };
+        folder_ids.insert(rel.clone(), id);
+    }
+    state.invalidate_entries().await;
+
+    // Enqueue file uploads (overwrite existing documents in place).
+    let mut kinds = Vec::new();
+    for (abs, rel) in files {
+        let parent_rel = rel.parent().map(Path::to_path_buf).unwrap_or_default();
+        let folder_id = folder_ids
+            .get(&parent_rel)
+            .cloned()
+            .unwrap_or_else(|| dest_folder_id.clone());
+        let file_name = rel
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let remote_file_path = join_remote(&dest_folder_path, &root_name, &rel);
+        let existing = match client.resolve_path(&remote_file_path).await {
+            Ok(e) if !e.is_folder() => Some(e.entry_id),
+            _ => None,
+        };
+        kinds.push((
+            file_name.clone(),
+            JobKind::Upload {
+                local_path: abs,
+                file_name,
+                dest_folder_id: folder_id,
+                existing_doc_id: existing,
+            },
+        ));
+    }
+    Ok(transfers::enqueue(state.inner(), kinds).await)
+}
+
+fn join_remote(base: &str, root: &str, rel: &Path) -> String {
+    let mut s = format!("{base}/{root}");
+    for comp in rel.components() {
+        s.push('/');
+        s.push_str(&comp.as_os_str().to_string_lossy());
+    }
+    s
+}
+
+/// Enqueues downloads for entries; folders are mirrored recursively into
+/// `target_dir` (FR-TRF-2/5). Local collisions get a ` (n)` suffix.
+#[tauri::command]
+pub async fn download_entries(
+    state: S<'_>,
+    ids: Vec<String>,
+    target_dir: String,
+) -> CmdResult<Vec<u64>> {
+    let entries = cached_entries(state.inner()).await?;
+    let target_dir = PathBuf::from(target_dir);
+    let mut kinds = Vec::new();
+
+    for id in &ids {
+        let entry = find_entry(&entries, id)?;
+        if entry.is_folder() {
+            let base_path = format!("{}/", entry.entry_path);
+            let local_base = unique_path(&target_dir.join(&entry.entry_name));
+            for sub in entries.iter().filter(|e| e.entry_path.starts_with(&base_path)) {
+                let rel = &sub.entry_path[base_path.len()..];
+                let local = local_base.join(rel);
+                if sub.is_folder() {
+                    std::fs::create_dir_all(&local)?;
+                } else {
+                    kinds.push((
+                        sub.entry_name.clone(),
+                        JobKind::Download {
+                            entry_id: sub.entry_id.clone(),
+                            target_path: local,
+                        },
+                    ));
+                }
+            }
+        } else {
+            let target = unique_path(&target_dir.join(&entry.entry_name));
+            kinds.push((
+                entry.entry_name.clone(),
+                JobKind::Download {
+                    entry_id: entry.entry_id.clone(),
+                    target_path: target,
+                },
+            ));
+        }
+    }
+    Ok(transfers::enqueue(state.inner(), kinds).await)
+}
+
+/// Appends ` (n)` before the extension until the path does not exist.
+fn unique_path(path: &Path) -> PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let ext = path.extension().and_then(|e| e.to_str());
+    for n in 2..1000 {
+        let name = match ext {
+            Some(ext) => format!("{stem} ({n}).{ext}"),
+            None => format!("{stem} ({n})"),
+        };
+        let candidate = path.with_file_name(name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path.to_path_buf()
+}
+
+#[derive(Serialize)]
+pub struct PathInfo {
+    pub path: String,
+    pub file_name: String,
+    pub is_dir: bool,
+}
+
+/// Classifies dropped/picked paths so the frontend can route folders to
+/// `upload_folder` and files to `upload_files`.
+#[tauri::command]
+pub fn classify_paths(paths: Vec<String>) -> Vec<PathInfo> {
+    paths
+        .into_iter()
+        .map(|p| {
+            let path = PathBuf::from(&p);
+            PathInfo {
+                file_name: path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                is_dir: path.is_dir(),
+                path: p,
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn transfer_list(state: S<'_>) -> CmdResult<Vec<JobSnapshot>> {
+    Ok(transfers::snapshot(state.inner()).await)
+}
+
+#[tauri::command]
+pub async fn transfer_cancel(state: S<'_>, id: u64) -> CmdResult<()> {
+    transfers::cancel(state.inner(), id).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn transfers_clear_finished(state: S<'_>) -> CmdResult<()> {
+    transfers::clear_finished(state.inner()).await;
+    Ok(())
 }

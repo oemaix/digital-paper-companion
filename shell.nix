@@ -47,6 +47,9 @@ pkgs.mkShell {
     # Works around a WebKitGTK DMA-BUF rendering issue on some
     # GPU/driver combinations (blank Tauri window).
     export WEBKIT_DISABLE_DMABUF_RENDERER=1
+    # If the window is blank or frozen on NVIDIA, additionally try:
+    #   export WEBKIT_DISABLE_COMPOSITING_MODE=1
+    #   export GDK_BACKEND=x11
     echo "Digital Paper Companion dev shell — rustc $(rustc --version | cut -d' ' -f2), node $(node --version)"
   '';
 }
