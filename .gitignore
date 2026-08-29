@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+dist/
+
+# Tauri
+src-tauri/gen/schemas/
+
+# Nix
+result
+result-*
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Local env
+.env
+.envrc.local
+
+# Logs
+*.log

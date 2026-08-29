@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability of the main window. Kept minimal by design (NFR-SEC-6): the webview may only call the typed commands exposed by dpt-app.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

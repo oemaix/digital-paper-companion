@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+/* Design tokens per docs/05-ui-ux-specification.md §5.1 */
+@theme {
+  --color-bg: #fafaf8;
+  --color-surface: #ffffff;
+  --color-border: #e4e4e0;
+  --color-text: #1c1e21;
+  --color-text-secondary: #6b6f76;
+  --color-accent: #2563eb;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+}
+
+/* Dark theme (follows OS setting; manual override lands with settings UI) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #111315;
+    --color-surface: #1a1d1f;
+    --color-border: #2a2e31;
+    --color-text: #ecedee;
+    --color-text-secondary: #9ba1a6;
+    --color-accent: #3b82f6;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    "Inter",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}

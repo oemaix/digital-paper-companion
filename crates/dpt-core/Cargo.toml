@@ -1,0 +1,27 @@
+[package]
+name = "dpt-core"
+description = "Protocol client and sync engine for Sony Digital Paper (DPT-RP1/DPT-CP1) devices. UI-agnostic; no Tauri dependencies."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+aes = "0.9.3"
+base64 = "0.23.1"
+cbc = { version = "0.2.1", features = ["alloc"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+hmac = "0.13.0"
+mdns-sd = "0.21.0"
+num-bigint = "0.5.1"
+pbkdf2 = "0.13.0"
+rand = "0.10.2"
+reqwest = { version = "0.13.4", features = ["json", "stream", "multipart"] }
+rsa = { version = "0.9.10", features = ["sha2"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+thiserror = "2.0.20"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
+tracing = "0.1.44"
+uuid = { version = "1.26.0", features = ["v4", "serde"] }
