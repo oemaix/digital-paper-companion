@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/dpt-core", "src-tauri"]
 
 [workspace.package]
-version = "0.2.0-pre.1"
+version = "0.2.0-1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 authors = ["Digital Paper Companion contributors"]
@@ -11,7 +11,7 @@ repository = ""
 
 [workspace.dependencies]
 # Path-only: a version constraint like `^0.1.0` rejects workspace
-# pre-releases (Cargo will not match `0.2.0-pre.1` against `^0.1.0`).
+# pre-releases (Cargo will not match `0.2.0-1` against `^0.1.0`).
 dpt-core = { path = "crates/dpt-core" }
 
 [profile.release]

@@ -66,6 +66,8 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: Digital Paper Companion v__VERSION__
+          # MSI (WiX) only accepts a numeric pre-release, e.g. 0.2.0-1
+          # not 0.2.0-pre.1.
           releaseBody: Phase 2 pre-release — folder sync and first installers. Not signed.
           releaseDraft: false
           prerelease: true
