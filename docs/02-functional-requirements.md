@@ -43,7 +43,6 @@ Protocol references (`§n`) refer to
 | FR-SET-3 | P1 | The app MUST offer "Set clock from this computer" writing the current UTC time to `datetime`, and SHOULD do this automatically before every sync run (see 06). |
 | FR-SET-4 | P2 | The app SHOULD manage the device's Wi-Fi: toggle the radio, list stored networks, scan for visible networks, add a network (WPA-PSK or open, DHCP or static, with proxy flag), and remove stored networks. SSIDs are Base64-wrapped per §7.6. Wi-Fi passwords entered by the user are sent to the device and never stored by the app. |
 | FR-SET-5 | P2 | The app SHOULD capture a screenshot of the device screen (`/system/controls/screen_shot`) and let the user save it as PNG/JPEG or copy it to the clipboard. (§7.9) |
-| FR-SET-6 | P3 | The app MAY support the firmware update flow (upload, precheck, trigger; §7.10) with prominent warnings; deferred to a post-v1 release. |
 
 ## 4. Content browsing (BRW)
 

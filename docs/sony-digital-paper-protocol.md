@@ -11,6 +11,8 @@ everything needed to write a compatible client in any programming language.
 
 1. [Overview](#1-overview)
 2. [Transports and connectivity](#2-transports-and-connectivity)
+   - [2.1 USB (Ethernet-over-USB)](#21-usb-ethernet-over-usb)
+   - [2.2 TLS](#22-tls)
 3. [Device discovery](#3-device-discovery)
 4. [Registration (pairing) protocol](#4-registration-pairing-protocol)
 5. [Session authentication](#5-session-authentication)
@@ -38,18 +40,18 @@ everything needed to write a compatible client in any programming language.
 
 A Digital Paper device runs two HTTP servers:
 
-| Server | Scheme | Port | Purpose |
-|---|---|---|---|
-| Registration server | plain HTTP | **8080** | Pairing (registration), device information, API version. No authentication. |
-| Main API server | HTTPS (TLS) | **8443** | All device functionality. Requires a paired client and an authenticated session. |
+| Server              | Scheme      | Port     | Purpose                                                                          |
+| ------------------- | ----------- | -------- | -------------------------------------------------------------------------------- |
+| Registration server | plain HTTP  | **8080** | Pairing (registration), device information, API version. No authentication.      |
+| Main API server     | HTTPS (TLS) | **8443** | All device functionality. Requires a paired client and an authenticated session. |
 
 The high-level lifecycle of a client is:
 
 1. **Discover** the device's IP address (mDNS, fixed Bluetooth address, or
    user-supplied address).
 2. **Register** (pair) once per client. This is an interactive, PIN-confirmed
-   key-exchange over HTTP port 8080. It yields a *client ID* (a UUID chosen by
-   the client) and a client-generated *RSA-2048 private key*, which the device
+   key-exchange over HTTP port 8080. It yields a _client ID_ (a UUID chosen by
+   the client) and a client-generated _RSA-2048 private key_, which the device
    remembers. It also returns a PEM certificate issued by the device's
    built-in CA.
 3. **Authenticate** at the start of every session: fetch a nonce, sign it with
@@ -72,24 +74,75 @@ The device is reachable over any IP transport:
   is shown in the device's Wi-Fi settings when tapping the connected network.
 - **Bluetooth (PAN)** — the device typically has the fixed address
   `172.25.47.1`.
-- **USB (Ethernet-over-USB)** — the device enumerates as a USB CDC ACM serial
-  device (e.g. `/dev/ttyACM0` on Linux). Writing a magic byte sequence to that
-  serial port switches it into a network mode:
+- **USB (Ethernet-over-USB)** — see §2.1. After the mode switch the HTTP/HTTPS
+  API is the same as over Wi-Fi; only the address and discovery path differ.
 
-  | Byte sequence written to serial port | Resulting mode |
-  |---|---|
-  | `01 00 00 01 00 00 00 01 00 04` | RNDIS (Windows-style Ethernet-over-USB) |
-  | `01 00 00 01 00 00 00 01 01 04` | CDC/ECM (Mac-style Ethernet-over-USB) |
+### 2.1 USB (Ethernet-over-USB)
 
-  In these modes the device uses an **IPv6 link-local address** and announces
-  itself over mDNS as `digitalpaper.local` (Sony) or `Android.local` (Fujitsu
-  Quaderno). The device does **not** run a DHCP server; the host side should
-  use link-local addressing. When using the IPv6 link-local address, a zone
-  (scope) identifier is required, e.g.
-  `https://[fe80::xxxx:xxxx:xxxx:xxxx%usb0]:8443/...`. See
-  [linux-ethernet-over-usb.md](linux-ethernet-over-usb.md) for details.
+When plugged into a USB port the device first enumerates as a **USB CDC ACM**
+serial device (a virtual COM port), typically `/dev/ttyACM0` on Linux. It is
+not yet a network interface. Writing a 10-byte command to that serial port
+re-enumerates the device as Ethernet-over-USB. Two mutually exclusive modes
+exist; enabling one is enough. Linux hosts accept both.
 
-### TLS
+| Bytes written to the CDC ACM port | Resulting USB class | Intended host                 |
+| --------------------------------- | ------------------- | ----------------------------- |
+| `01 00 00 01 00 00 00 01 00 04`   | Remote NDIS (RNDIS) | Windows                       |
+| `01 00 00 01 00 00 00 01 01 04`   | USB CDC/ECM         | macOS (Linux supports either) |
+
+On a successful switch the host kernel registers an Ethernet interface
+(often `usb0`) and logs the device's MAC address, for example:
+
+```
+rndis_host 2-1:1.0 usb0: register 'rndis_host' … RNDIS device, xx:xx:xx:xx:xx:xx
+cdc_ether  2-1:1.0 usb0: register 'cdc_ether'  … CDC Ethernet Device, xx:xx:xx:xx:xx:xx
+```
+
+The device does **not** run a DHCP server. The host must use **link-local**
+addressing on that interface (IPv4 `169.254.0.0/16` and/or IPv6 `fe80::/10`).
+If the host's network manager would otherwise request DHCP, disable it for
+this interface. On NetworkManager, IPv4 method "Link-Local Only" (not
+"Automatic") and binding the profile to the _interface name_ rather than the
+MAC address makes the setting survive the next plug-in.
+
+In Ethernet-over-USB mode the device's own address is an **IPv6 link-local**
+address, advertised via mDNS:
+
+| mDNS hostname        | Device                            |
+| -------------------- | --------------------------------- |
+| `digitalpaper.local` | Sony DPT-RP1 / DPT-CP1            |
+| `Android.local`      | Fujitsu Quaderno (Gen 2 observed) |
+
+A resolver such as Avahi returns the address without a zone identifier:
+
+```
+$ avahi-resolve -n digitalpaper.local
+digitalpaper.local	fe80::xxxx:xxxx:xxxx:xxxx
+```
+
+IPv6 link-local addresses are scoped to one interface. The usable form
+appends the host interface as a zone id (`usb0` in the example above):
+
+```
+https://[fe80::xxxx:xxxx:xxxx:xxxx%usb0]:8443/...
+```
+
+HTTP libraries must pass the zone id through to the socket layer (urllib3
+≥ 1.22 accepts this syntax). If the hostname is unknown, browse the
+vendor-specific DNS-SD type on the USB interface instead:
+
+```
+$ avahi-browse -avr
+= usb0 IPv6 Digital Paper FMVDP41   _dp_fujitsu._tcp   local
+   hostname = [Android.local]
+   address  = [fe80::xxxx:xxxx:xxxx:xxxx]
+   port     = [8080]
+```
+
+The advertised port is the **registration** server (8080). The main API
+remains HTTPS on **8443** at the same address.
+
+### 2.2 TLS
 
 The main API server presents a certificate signed by the device's own CA. The
 per-device server certificate is delivered to the client during registration
@@ -107,10 +160,10 @@ authenticates via the nonce-signing scheme in section 5.
 
 The device advertises itself via **mDNS / DNS-SD** with these service types:
 
-| Service type | Vendor |
-|---|---|
+| Service type                | Vendor                 |
+| --------------------------- | ---------------------- |
 | `_digitalpaper._tcp.local.` | Sony DPT-RP1 / DPT-CP1 |
-| `_dp_fujitsu._tcp.local.` | Fujitsu Quaderno |
+| `_dp_fujitsu._tcp.local.`   | Fujitsu Quaderno       |
 
 The mDNS service record contains the device's IP address(es) and a port
 (observed to be **8080**, the registration server). Discovery only works for a
@@ -143,7 +196,7 @@ Its outcome:
 
 - The client invents a **client ID** (a random UUIDv4 string) and generates an
   **RSA-2048 key pair** (public exponent 65537).
-- The device stores the client ID and the client's RSA *public* key.
+- The device stores the client ID and the client's RSA _public_ key.
 - The device sends the client a **PEM X.509 certificate** (the device's server
   certificate issued by its on-device CA), which may be used for TLS pinning.
 
@@ -156,14 +209,14 @@ them as `deviceid.dat` and `privatekey.dat`.)
 All bodies are JSON (`Content-Type: application/json`). All binary values are
 Base64 strings.
 
-| Step | Request | Body | Response |
-|---|---|---|---|
-| 0 | `PUT /register/cleanup` | none | `204 No Content` — aborts/cleans any half-finished registration |
-| 1 | `POST /register/pin` | none | **M1** (JSON) — device shows a PIN on its screen |
-| 2 | `POST /register/hash` | **M2** | **M3** |
-| 3 | `POST /register/ca` | **M4** | **M5** |
-| 4 | `POST /register` | **M6** | success status (registration committed) |
-| 5 | `PUT /register/cleanup` | none | `204 No Content` |
+| Step | Request                 | Body   | Response                                                        |
+| ---- | ----------------------- | ------ | --------------------------------------------------------------- |
+| 0    | `PUT /register/cleanup` | none   | `204 No Content` — aborts/cleans any half-finished registration |
+| 1    | `POST /register/pin`    | none   | **M1** (JSON) — device shows a PIN on its screen                |
+| 2    | `POST /register/hash`   | **M2** | **M3**                                                          |
+| 3    | `POST /register/ca`     | **M4** | **M5**                                                          |
+| 4    | `POST /register`        | **M6** | success status (registration committed)                         |
+| 5    | `PUT /register/cleanup` | none   | `204 No Content`                                                |
 
 If any parameter is malformed the device answers `403` with a message like
 "Bad parameters for registration process".
@@ -269,29 +322,29 @@ covers material from the previous message, chaining the whole handshake.
 
 **M1** (device → client, response to `POST /register/pin`):
 
-| Field | Value |
-|---|---|
-| `a` | `n1` — device nonce (16 bytes) |
-| `b` | `mac` — opaque device identifier bytes |
-| `c` | `yb` — device DH public key (256 or 257 bytes, see 4.4) |
+| Field | Value                                                   |
+| ----- | ------------------------------------------------------- |
+| `a`   | `n1` — device nonce (16 bytes)                          |
+| `b`   | `mac` — opaque device identifier bytes                  |
+| `c`   | `yb` — device DH public key (256 or 257 bytes, see 4.4) |
 
 **M2** (client → device, body of `POST /register/hash`):
 
-| Field | Value |
-|---|---|
-| `a` | `n1` (echoed) |
-| `b` | `n2` — fresh 16-byte client nonce |
-| `c` | `mac` (echoed) |
-| `d` | `ya` — client DH public key (257 bytes) |
-| `e` | `m2hmac = HMAC(authKey, n1 ‖ mac ‖ yb ‖ n1 ‖ n2 ‖ mac ‖ ya)` |
+| Field | Value                                                        |
+| ----- | ------------------------------------------------------------ |
+| `a`   | `n1` (echoed)                                                |
+| `b`   | `n2` — fresh 16-byte client nonce                            |
+| `c`   | `mac` (echoed)                                               |
+| `d`   | `ya` — client DH public key (257 bytes)                      |
+| `e`   | `m2hmac = HMAC(authKey, n1 ‖ mac ‖ yb ‖ n1 ‖ n2 ‖ mac ‖ ya)` |
 
 **M3** (device → client, response to `POST /register/hash`):
 
-| Field | Value |
-|---|---|
-| `a` | `n2` — client must verify it equals its own `n2` |
-| `b` | `eHash` — device's PIN commitment (32 bytes, verified in step M5) |
-| `e` | `m3hmac` — client must verify: `HMAC(authKey, n1 ‖ n2 ‖ mac ‖ ya ‖ m2hmac ‖ n2 ‖ eHash)` |
+| Field | Value                                                                                    |
+| ----- | ---------------------------------------------------------------------------------------- |
+| `a`   | `n2` — client must verify it equals its own `n2`                                         |
+| `b`   | `eHash` — device's PIN commitment (32 bytes, verified in step M5)                        |
+| `e`   | `m3hmac` — client must verify: `HMAC(authKey, n1 ‖ n2 ‖ mac ‖ ya ‖ m2hmac ‖ n2 ‖ eHash)` |
 
 At this point the user reads the **PIN** from the device display. The client
 computes:
@@ -305,20 +358,20 @@ wrappedRs = wrap(rs)
 
 **M4** (client → device, body of `POST /register/ca`):
 
-| Field | Value |
-|---|---|
-| `a` | `n1` |
-| `b` | `rHash` |
-| `d` | `wrappedRs` |
-| `e` | `m4hmac = HMAC(authKey, n2 ‖ eHash ‖ m3hmac ‖ n1 ‖ rHash ‖ wrappedRs)` |
+| Field | Value                                                                  |
+| ----- | ---------------------------------------------------------------------- |
+| `a`   | `n1`                                                                   |
+| `b`   | `rHash`                                                                |
+| `d`   | `wrappedRs`                                                            |
+| `e`   | `m4hmac = HMAC(authKey, n2 ‖ eHash ‖ m3hmac ‖ n1 ‖ rHash ‖ wrappedRs)` |
 
 **M5** (device → client, response to `POST /register/ca`):
 
-| Field | Value |
-|---|---|
-| `a` | `n2` — verify against client's `n2` |
-| `d` | `wrappedEsCert` — wrapped payload, see below |
-| `e` | `m5hmac` — verify: `HMAC(authKey, n1 ‖ rHash ‖ wrappedRs ‖ m4hmac ‖ n2 ‖ wrappedEsCert)` |
+| Field | Value                                                                                    |
+| ----- | ---------------------------------------------------------------------------------------- |
+| `a`   | `n2` — verify against client's `n2`                                                      |
+| `d`   | `wrappedEsCert` — wrapped payload, see below                                             |
+| `e`   | `m5hmac` — verify: `HMAC(authKey, n1 ‖ rHash ‖ wrappedRs ‖ m4hmac ‖ n2 ‖ wrappedEsCert)` |
 
 The client unwraps `d`:
 
@@ -346,11 +399,11 @@ wrappedDIDKPUBC = wrap( UTF8(client_id) ‖ keyPubC )
 
 **M6** (client → device, body of `POST /register`):
 
-| Field | Value |
-|---|---|
-| `a` | `n1` |
-| `d` | `wrappedDIDKPUBC` |
-| `e` | `m6hmac = HMAC(authKey, n2 ‖ wrappedEsCert ‖ m5hmac ‖ n1 ‖ wrappedDIDKPUBC)` |
+| Field | Value                                                                        |
+| ----- | ---------------------------------------------------------------------------- |
+| `a`   | `n1`                                                                         |
+| `d`   | `wrappedDIDKPUBC`                                                            |
+| `e`   | `m6hmac = HMAC(authKey, n2 ‖ wrappedEsCert ‖ m5hmac ‖ n1 ‖ wrappedDIDKPUBC)` |
 
 On success the device permanently associates `client_id` with the client's
 RSA public key. Finish with `PUT /register/cleanup`.
@@ -373,7 +426,7 @@ GET https://{addr}:8443/auth/nonce/{client_id}
 ```
 
 **Step 2 — sign the nonce.** Sign the ASCII bytes of the nonce string exactly
-as received (i.e. the Base64 text itself, *not* its decoded bytes) using
+as received (i.e. the Base64 text itself, _not_ its decoded bytes) using
 **RSA PKCS#1 v1.5 with SHA-256** and the private key from registration.
 Base64-encode the 256-byte signature.
 
@@ -424,7 +477,7 @@ requires the `Credentials` cookie.
 
 ### 6.2 The entry model (documents and folders)
 
-The device exposes a single tree of *entries*. The root folder is named
+The device exposes a single tree of _entries_. The root folder is named
 **`Document`** (displayed as "System Storage" on the device). Every path
 starts with `Document/`, e.g. `Document/Papers/file.pdf`.
 
@@ -433,23 +486,23 @@ the device. Path-based operations first resolve a path to an ID (7.3.1).
 
 An entry object contains (fields observed; folders omit file-specific ones):
 
-| Field | Type/format | Description |
-|---|---|---|
-| `entry_id` | UUID string | Unique ID, used in URLs |
-| `entry_name` | string | File or folder name |
-| `entry_path` | string | Full path, e.g. `Document/x/y.pdf` |
-| `entry_type` | `"document"` or `"folder"` | |
-| `parent_folder_id` | UUID string | ID of containing folder |
-| `created_date` | `YYYY-MM-DDTHH:MM:SSZ` (UTC) | |
-| `modified_date` | `YYYY-MM-DDTHH:MM:SSZ` (UTC) | Documents only |
-| `reading_date` | `YYYY-MM-DDTHH:MM:SSZ` (UTC) | Last-read time, may be absent |
-| `file_size` | numeric string | Bytes, documents only |
-| `file_revision` | string, e.g. `a21ea4b1c368.2.0` | Changes on modification |
-| `mime_type` | string, e.g. `application/pdf` | Documents only |
-| `title` | string | PDF metadata title |
-| `total_page` | numeric string | Page count |
-| `is_new` | `"true"` / `"false"` | Unread flag |
-| `document_source` | string | Origin marker, may be empty/absent |
+| Field              | Type/format                     | Description                        |
+| ------------------ | ------------------------------- | ---------------------------------- |
+| `entry_id`         | UUID string                     | Unique ID, used in URLs            |
+| `entry_name`       | string                          | File or folder name                |
+| `entry_path`       | string                          | Full path, e.g. `Document/x/y.pdf` |
+| `entry_type`       | `"document"` or `"folder"`      |                                    |
+| `parent_folder_id` | UUID string                     | ID of containing folder            |
+| `created_date`     | `YYYY-MM-DDTHH:MM:SSZ` (UTC)    |                                    |
+| `modified_date`    | `YYYY-MM-DDTHH:MM:SSZ` (UTC)    | Documents only                     |
+| `reading_date`     | `YYYY-MM-DDTHH:MM:SSZ` (UTC)    | Last-read time, may be absent      |
+| `file_size`        | numeric string                  | Bytes, documents only              |
+| `file_revision`    | string, e.g. `a21ea4b1c368.2.0` | Changes on modification            |
+| `mime_type`        | string, e.g. `application/pdf`  | Documents only                     |
+| `title`            | string                          | PDF metadata title                 |
+| `total_page`       | numeric string                  | Page count                         |
+| `is_new`           | `"true"` / `"false"`            | Unread flag                        |
+| `document_source`  | string                          | Origin marker, may be empty/absent |
 
 The device stores **PDF files only**.
 
@@ -467,19 +520,19 @@ spaces become `+` (Python's `quote_plus`). Example:
 
 ### 7.1 Unauthenticated endpoints (HTTP, port 8080)
 
-| Method & path | Description |
-|---|---|
-| `GET /register/information` | Device information JSON; includes `serial_number` (and further model/firmware fields). Also available authenticated on port 8443. |
-| `GET /api_version` | `{ "value": "<api version string>" }` |
-| `PUT /register/cleanup`, `POST /register/pin`, `POST /register/hash`, `POST /register/ca`, `POST /register` | Registration protocol, see section 4. |
+| Method & path                                                                                               | Description                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /register/information`                                                                                 | Device information JSON; includes `serial_number` (and further model/firmware fields). Also available authenticated on port 8443. |
+| `GET /api_version`                                                                                          | `{ "value": "<api version string>" }`                                                                                             |
+| `PUT /register/cleanup`, `POST /register/pin`, `POST /register/hash`, `POST /register/ca`, `POST /register` | Registration protocol, see section 4.                                                                                             |
 
 ### 7.2 Authentication
 
-| Method & path | Body | Response |
-|---|---|---|
-| `GET /auth/nonce/{client_id}` | — | `{ "nonce": "<base64>" }` |
-| `PUT /auth` | `{ "client_id": "...", "nonce_signed": "<base64>" }` | `Set-Cookie: Credentials=...` |
-| `GET /ping` | — | 2xx if the session is valid |
+| Method & path                 | Body                                                 | Response                      |
+| ----------------------------- | ---------------------------------------------------- | ----------------------------- |
+| `GET /auth/nonce/{client_id}` | —                                                    | `{ "nonce": "<base64>" }`     |
+| `PUT /auth`                   | `{ "client_id": "...", "nonce_signed": "<base64>" }` | `Set-Cookie: Credentials=...` |
+| `GET /ping`                   | —                                                    | 2xx if the session is valid   |
 
 ### 7.3 Documents and folders
 
@@ -594,12 +647,12 @@ POST /documents/{document_id}/copy
 
 Templates are blank-note backgrounds managed separately from documents.
 
-| Method & path | Body / Notes |
-|---|---|
-| `GET /viewer/configs/note_templates` | → `{ "template_list": [ { "template_name": "...", "note_template_id": "..." }, ... ] }` |
-| `POST /viewer/configs/note_templates` | `{ "templateName": "<name>", "document_source": "" }` → `{ "note_template_id": "<id>" }`. Note the **camelCase** key `templateName`, unlike the snake_case used elsewhere. |
-| `PUT /viewer/configs/note_templates/{note_template_id}/file` | multipart file upload (section 8) with the template PDF |
-| `DELETE /viewer/configs/note_templates/{note_template_id}` | delete a template |
+| Method & path                                                | Body / Notes                                                                                                                                                               |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /viewer/configs/note_templates`                         | → `{ "template_list": [ { "template_name": "...", "note_template_id": "..." }, ... ] }`                                                                                    |
+| `POST /viewer/configs/note_templates`                        | `{ "templateName": "<name>", "document_source": "" }` → `{ "note_template_id": "<id>" }`. Note the **camelCase** key `templateName`, unlike the snake_case used elsewhere. |
+| `PUT /viewer/configs/note_templates/{note_template_id}/file` | multipart file upload (section 8) with the template PDF                                                                                                                    |
+| `DELETE /viewer/configs/note_templates/{note_template_id}`   | delete a template                                                                                                                                                          |
 
 ### 7.5 Viewer control
 
@@ -617,30 +670,30 @@ PUT /viewer/controls/open2
 **SSIDs are Base64-encoded** (UTF-8 bytes of the network name) in access-point
 listing/registration payloads.
 
-| Method & path | Description |
-|---|---|
-| `GET /system/configs/wifi_accesspoints` | Stored access points: `{ "aplist": [ { "ssid": "<base64>", "security": "...", ... }, ... ] }` |
-| `POST /system/controls/wifi_accesspoints/scan` | Performs a scan and returns visible networks in the same `aplist` format |
-| `PUT /system/controls/wifi_accesspoints/register` | Add/configure a network, body below |
-| `DELETE /system/configs/wifi_accesspoints/{ssid}/{security}` | Remove a stored network. `ssid` is the plain (URL-encoded) network name; `security` as below |
-| `GET /system/configs/wifi` | → `{ "value": "on" | "off" }` |
-| `PUT /system/configs/wifi` | `{ "value": "on" }` or `{ "value": "off" }` — switch the Wi-Fi radio |
+| Method & path                                                | Description                                                                                   |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `GET /system/configs/wifi_accesspoints`                      | Stored access points: `{ "aplist": [ { "ssid": "<base64>", "security": "...", ... }, ... ] }` |
+| `POST /system/controls/wifi_accesspoints/scan`               | Performs a scan and returns visible networks in the same `aplist` format                      |
+| `PUT /system/controls/wifi_accesspoints/register`            | Add/configure a network, body below                                                           |
+| `DELETE /system/configs/wifi_accesspoints/{ssid}/{security}` | Remove a stored network. `ssid` is the plain (URL-encoded) network name; `security` as below  |
+| `GET /system/configs/wifi`                                   | → `{ "value": "on"                                                                            | "off" }` |
+| `PUT /system/configs/wifi`                                   | `{ "value": "on" }` or `{ "value": "off" }` — switch the Wi-Fi radio                          |
 
 Body of `PUT /system/controls/wifi_accesspoints/register` (all values are
 strings):
 
 ```json
 {
-  "ssid":           "<base64 of UTF-8 SSID>",
-  "security":       "psk",
-  "passwd":         "<passphrase, empty if open>",
-  "dhcp":           "true",
+  "ssid": "<base64 of UTF-8 SSID>",
+  "security": "psk",
+  "passwd": "<passphrase, empty if open>",
+  "dhcp": "true",
   "static_address": "",
-  "gateway":        "",
-  "network_mask":   "",
-  "dns1":           "",
-  "dns2":           "",
-  "proxy":          "false"
+  "gateway": "",
+  "network_mask": "",
+  "dns1": "",
+  "dns2": "",
+  "proxy": "false"
 }
 ```
 
@@ -671,15 +724,15 @@ and read with `GET /system/configs/{key}` → `{ "value": ... }`.
 
 Known keys:
 
-| Key | Value |
-|---|---|
-| `datetime` | UTC time as `YYYY-MM-DDTHH:MM:SSZ` (write to set the device clock) |
-| `timezone` | Time zone identifier |
-| `date_format` | Display date format |
-| `time_format` | Display time format (12/24 h) |
-| `timeout_to_standby` | Minutes until standby |
-| `owner` | Owner name string |
-| `wifi` | `"on"` / `"off"` (see 7.6) |
+| Key                  | Value                                                              |
+| -------------------- | ------------------------------------------------------------------ |
+| `datetime`           | UTC time as `YYYY-MM-DDTHH:MM:SSZ` (write to set the device clock) |
+| `timezone`           | Time zone identifier                                               |
+| `date_format`        | Display date format                                                |
+| `time_format`        | Display time format (12/24 h)                                      |
+| `timeout_to_standby` | Minutes until standby                                              |
+| `owner`              | Owner name string                                                  |
+| `wifi`               | `"on"` / `"off"` (see 7.6)                                         |
 
 The full authoritative key list for a given firmware is whatever
 `GET /system/configs/` returns; a generic client can round-trip that object
@@ -689,19 +742,19 @@ by PUT-ting each key back.
 
 Read-only values under `/system/status/`:
 
-| Method & path | Response |
-|---|---|
-| `GET /system/status/storage` | JSON with storage figures (total/available capacity) |
-| `GET /system/status/battery` | JSON with battery state (level, charging status, …) |
-| `GET /system/status/firmware_version` | `{ "value": "<version>" }` |
-| `GET /system/status/mac_address` | `{ "value": "<mac>" }` |
-| `GET /register/information` | Device info incl. `serial_number` (also unauthenticated on port 8080) |
+| Method & path                         | Response                                                              |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `GET /system/status/storage`          | JSON with storage figures (total/available capacity)                  |
+| `GET /system/status/battery`          | JSON with battery state (level, charging status, …)                   |
+| `GET /system/status/firmware_version` | `{ "value": "<version>" }`                                            |
+| `GET /system/status/mac_address`      | `{ "value": "<mac>" }`                                                |
+| `GET /register/information`           | Device info incl. `serial_number` (also unauthenticated on port 8080) |
 
 ### 7.9 Screenshots
 
-| Method & path | Response |
-|---|---|
-| `GET /system/controls/screen_shot` | Current screen as **PNG** bytes |
+| Method & path                                  | Response                         |
+| ---------------------------------------------- | -------------------------------- |
+| `GET /system/controls/screen_shot`             | Current screen as **PNG** bytes  |
 | `GET /system/controls/screen_shot2?query=jpeg` | Current screen as **JPEG** bytes |
 
 ### 7.10 Firmware update
@@ -778,7 +831,7 @@ to the device.
 2. **Never re-encode `yb`:** HMAC the device's DH public key exactly as
    received (may be 256 or 257 bytes).
 3. **Encode `ya` as 257 bytes:** `0x00` + 256-byte big-endian value.
-4. **IV position:** the AES key-wrap puts the IV *after* the ciphertext.
+4. **IV position:** the AES key-wrap puts the IV _after_ the ciphertext.
 5. **Cookie parsing:** the device's `Set-Cookie` header may not parse with
    strict cookie jars — extract `Credentials=<value>` manually.
 6. **Sign the nonce string**, not its Base64-decoded bytes, with
@@ -788,26 +841,30 @@ to the device.
    returned list length and fall back to per-folder traversal if truncated.
 9. **Paths in URLs** use form encoding (spaces as `+`), applied to the whole
    path including its `/` separators (only the resolve endpoint takes paths).
-10. **IPv6 zone identifiers:** with link-local addresses
+10. **IPv6 zone identifiers:** with USB link-local addresses
     (`fe80::…%usb0`), ensure your HTTP stack does not percent-encode the `%`
     of the zone id in a way the transport layer cannot resolve.
-11. **Root folder is `Document`** — it always exists and cannot be deleted;
+11. **USB has no DHCP:** after the RNDIS/CDC-ECM switch, force link-local
+    addressing on the new interface; do not wait for a lease.
+12. **USB mDNS hostname** is `digitalpaper.local` (Sony) or `Android.local`
+    (Quaderno) — not interchangeable.
+13. **Root folder is `Document`** — it always exists and cannot be deleted;
     build all paths beneath it.
-12. **Set the clock**: writing `/system/configs/datetime` before comparing
+14. **Set the clock**: writing `/system/configs/datetime` before comparing
     `modified_date` values avoids drift issues when synchronizing.
 
 ---
 
 ## Appendix A: Cryptographic primitives
 
-| Primitive | Parameters |
-|---|---|
-| Diffie-Hellman | RFC 3526 MODP group 14: 2048-bit prime, generator 2; client private key 256-bit random |
-| KDF | PBKDF2-HMAC-SHA256, 10 000 iterations, 48-byte output |
-| MAC | HMAC-SHA256 (full 32-byte digests, except the 8-byte KWA truncation) |
-| Symmetric cipher | AES-128-CBC with PKCS#7 padding (key wrapping only) |
-| Client identity | RSA-2048, e = 65537; signatures RSASSA-PKCS1-v1_5 with SHA-256 |
-| Encoding | Base64 (standard alphabet with padding) for all binary values in JSON |
+| Primitive        | Parameters                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| Diffie-Hellman   | RFC 3526 MODP group 14: 2048-bit prime, generator 2; client private key 256-bit random |
+| KDF              | PBKDF2-HMAC-SHA256, 10 000 iterations, 48-byte output                                  |
+| MAC              | HMAC-SHA256 (full 32-byte digests, except the 8-byte KWA truncation)                   |
+| Symmetric cipher | AES-128-CBC with PKCS#7 padding (key wrapping only)                                    |
+| Client identity  | RSA-2048, e = 65537; signatures RSASSA-PKCS1-v1_5 with SHA-256                         |
+| Encoding         | Base64 (standard alphabet with padding) for all binary values in JSON                  |
 
 RFC 3526 group 14 prime (hex):
 
@@ -830,7 +887,7 @@ The `sync` feature of this repository is **not part of the device protocol**;
 it is implemented entirely client-side on top of the endpoints above. For
 reference, it works as follows:
 
-- A *checkpoint* file (`.sync` in the local sync folder) stores the remote
+- A _checkpoint_ file (`.sync` in the local sync folder) stores the remote
   entry list (paths, types, `modified_date`) as of the previous sync.
 - On each run the client gathers three views: checkpoint, current remote tree
   (7.3.2/7.3.3), and the local file tree, normalizing paths to NFC Unicode

@@ -46,7 +46,7 @@ Design values, in priority order:
 |---|---|---|
 | **The academic** | Reads and annotates papers on the DPT-RP1 daily | Fast upload of new PDFs, reliable download of annotated versions, folder sync with a "Papers" directory |
 | **The note-taker** | Uses the device mainly as a notepad | Downloading notes to the computer, managing note templates, browsing notes by date |
-| **The new owner** | Bought a second-hand device; never had the Sony app | Guided first-time setup: Wi-Fi, pairing, firmware basics, discovering what the device can do |
+| **The new owner** | Bought a second-hand device; never had the Sony app | Guided first-time setup: Wi-Fi, pairing, discovering what the device can do |
 | **The archivist** | Wants a complete, current backup of the device | Scheduled one-way or two-way sync, confidence that the local copy is complete |
 
 All personas are desktop users on Windows, macOS or Linux. No mobile client
@@ -78,8 +78,8 @@ is planned.
 
 - Editing or annotating PDFs inside the app (the OS default PDF viewer is
   used for previews).
-- Firmware update flows (the protocol supports it; deferred to a later
-  release — see roadmap).
+- Firmware updates. Sony has discontinued the device and ended support;
+  this companion will not upload or trigger firmware packages.
 - Cloud storage integrations (Dropbox, Google Drive, …).
 - Managing more than one device *simultaneously*; multiple devices may be
   registered and switched between, but only one active connection at a time.

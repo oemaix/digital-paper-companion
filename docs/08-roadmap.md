@@ -74,7 +74,6 @@ mutations on both sides) shows zero data loss and correct conflict copies.
 
 ## Post-1.0 candidates (unscheduled)
 
-- Firmware update flow with safety rails (FR-SET-6).
 - Template thumbnails; in-app PDF preview pane.
 - CLI companion built on `dpt-core`; headless sync daemon mode.
 - Fujitsu Quaderno-specific quirks/testing as hardware becomes available.
