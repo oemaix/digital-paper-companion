@@ -311,8 +311,10 @@ impl AwaitingM5 {
         // the same PIN. eHash (from M3) must equal HMAC(authKey, es‖psk‖yb‖ya)
         // where `es` is the device's secret nonce revealed in M5 and `psk`
         // encodes the PIN the user typed. A wrong PIN fails here.
-        let e_hash_check =
-            hmac_sha256(&self.keys.auth_key, &concat(&[es, &self.psk, &self.yb, &self.ya]));
+        let e_hash_check = hmac_sha256(
+            &self.keys.auth_key,
+            &concat(&[es, &self.psk, &self.yb, &self.ya]),
+        );
         if e_hash_check.as_slice() != self.e_hash.as_slice() {
             return Err(Error::Registration(
                 "PIN verification failed (device eHash mismatch)".into(),

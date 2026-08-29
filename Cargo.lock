@@ -376,6 +376,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f"
+dependencies = [
+ "memchr",
+ "serde_core",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,11 +1042,13 @@ name = "dpt-core"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "async-trait",
  "base64 0.22.1",
  "cbc",
  "chrono",
  "cipher",
  "futures-util",
+ "globset",
  "hmac",
  "mdns-sd",
  "num-bigint",
@@ -1049,10 +1061,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "tracing",
+ "unicode-normalization",
  "uuid",
 ]
 
@@ -1615,6 +1629,19 @@ name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
+name = "globset"
+version = "0.4.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07c34a9410465b45bd9787443bc7370f37735bad04b0f0cd57ff1a3186c98988"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata",
+ "regex-syntax",
+]
 
 [[package]]
 name = "gobject-sys"
@@ -5094,6 +5121,15 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-segmentation"

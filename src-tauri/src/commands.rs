@@ -17,7 +17,8 @@ use dpt_core::model::{BatteryStatus, DeviceAddr, DeviceInfo, Entry, StorageStatu
 
 use crate::error::{AppError, CmdResult};
 use crate::state::{AppState, ConnectionPayload, DeviceContext, PendingPairing};
-use crate::stores::{KnownDevice, Settings};
+use crate::stores::{KnownDevice, Settings, SyncPair};
+use crate::sync::{self, Decision, ExcludedAction, RunOptions, SyncStatusPayload, Trigger};
 use crate::transfers::{self, JobKind, JobSnapshot};
 
 type S<'a> = State<'a, Arc<AppState>>;
@@ -559,9 +560,7 @@ pub async fn upload_folder(
                     Some(p) if p.as_os_str().is_empty() && rel.as_os_str().is_empty() => {
                         unreachable!()
                     }
-                    _ if rel.as_os_str().is_empty() => {
-                        (dest_folder_id.clone(), root_name.clone())
-                    }
+                    _ if rel.as_os_str().is_empty() => (dest_folder_id.clone(), root_name.clone()),
                     Some(parent) => {
                         let pid = folder_ids
                             .get(parent)
@@ -641,7 +640,10 @@ pub async fn download_entries(
         if entry.is_folder() {
             let base_path = format!("{}/", entry.entry_path);
             let local_base = unique_path(&target_dir.join(&entry.entry_name));
-            for sub in entries.iter().filter(|e| e.entry_path.starts_with(&base_path)) {
+            for sub in entries
+                .iter()
+                .filter(|e| e.entry_path.starts_with(&base_path))
+            {
                 let rel = &sub.entry_path[base_path.len()..];
                 let local = local_base.join(rel);
                 if sub.is_folder() {
@@ -737,4 +739,167 @@ pub async fn transfer_cancel(state: S<'_>, id: u64) -> CmdResult<()> {
 pub async fn transfers_clear_finished(state: S<'_>) -> CmdResult<()> {
     transfers::clear_finished(state.inner()).await;
     Ok(())
+}
+
+// ---- sync (FR-SYN-*) ----------------------------------------------------------
+
+/// A sync pair together with its most recent run record, for the settings
+/// list (docs/05 §3.6).
+#[derive(Serialize)]
+pub struct SyncPairInfo {
+    #[serde(flatten)]
+    pub pair: SyncPair,
+    pub last_run: Option<serde_json::Value>,
+}
+
+#[tauri::command]
+pub fn sync_pairs(state: S<'_>) -> Vec<SyncPairInfo> {
+    state
+        .stores
+        .load_sync_pairs()
+        .into_iter()
+        .map(|pair| {
+            let last_run = state.stores.load_sync_history(&pair.id).into_iter().next();
+            SyncPairInfo { pair, last_run }
+        })
+        .collect()
+}
+
+/// Creates or updates a sync pair (FR-SYN-1). An empty id creates a new
+/// pair.
+#[tauri::command]
+pub fn sync_pair_upsert(state: S<'_>, mut pair: SyncPair) -> CmdResult<SyncPair> {
+    if pair.local_root.trim().is_empty() {
+        return Err(AppError::new("invalid", "choose a local folder"));
+    }
+    if pair.remote_root.trim().is_empty() {
+        pair.remote_root = "Document".into();
+    }
+    pair.remote_root = pair.remote_root.trim_matches('/').to_string();
+    if !pair.remote_root.starts_with("Document") {
+        return Err(AppError::new(
+            "invalid",
+            "the device folder must be inside 'Document'",
+        ));
+    }
+    if pair.id.trim().is_empty() {
+        pair.id = uuid::Uuid::new_v4().to_string();
+    }
+    // Validate the filter patterns early so the editor can show the error.
+    dpt_core::sync::Filters::new(&pair.filters).map_err(AppError::from)?;
+    state.stores.upsert_sync_pair(pair.clone())?;
+    Ok(pair)
+}
+
+#[tauri::command]
+pub fn sync_pair_delete(state: S<'_>, id: String) -> CmdResult<()> {
+    sync::cancel(state.inner(), &id);
+    state.stores.remove_sync_pair(&id)
+}
+
+/// Dry run (FR-SYN-5): plans without applying and returns every action.
+#[tauri::command]
+pub async fn sync_preview(state: S<'_>, id: String) -> CmdResult<dpt_core::sync::Plan> {
+    let pair = state
+        .stores
+        .load_sync_pairs()
+        .into_iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| AppError::new("not_found", "sync pair not found"))?;
+    let client = state.require_client().await?;
+
+    let cfg = dpt_core::sync::SyncPairConfig {
+        id: pair.id.clone(),
+        local_root: std::path::PathBuf::from(&pair.local_root),
+        remote_root: pair.remote_root.clone(),
+        mode: pair.mode,
+        filters: pair.filters.clone(),
+    };
+    // Per-device checkpoint: the plan is relative to the connected device's
+    // last-known state (multi-device hub model).
+    let serial = state.connected_serial().await.unwrap_or_default();
+    let checkpoint =
+        dpt_core::sync::Checkpoint::load(&state.stores.checkpoint_path(&pair.id, &serial))
+            .unwrap_or_else(|| {
+                dpt_core::sync::Checkpoint::new(&pair.id, &serial, &pair.remote_root)
+            });
+    let snap = dpt_core::sync::take_snapshot(client.as_ref(), &cfg, &checkpoint).await?;
+    Ok(dpt_core::sync::make_plan(&cfg, &checkpoint, &snap)?)
+}
+
+/// Starts a run of one pair (FR-SYN-3). `confirmed` marks a run applied
+/// from the preview dialog (skips the mass-deletion gate); `excluded`
+/// carries the deselected actions.
+#[tauri::command]
+pub fn sync_run(
+    state: S<'_>,
+    id: String,
+    confirmed: Option<bool>,
+    excluded: Option<Vec<ExcludedAction>>,
+) -> CmdResult<()> {
+    let options = RunOptions {
+        confirmed: confirmed.unwrap_or(false),
+        excluded: excluded.unwrap_or_default(),
+    };
+    sync::enqueue(state.inner(), &id, Trigger::Manual, options);
+    Ok(())
+}
+
+/// Toolbar/tray "Sync now": queues every enabled pair (FR-SYN-3). Returns
+/// the number of runs actually enqueued (already queued/running pairs are
+/// not double-queued).
+#[tauri::command]
+pub fn sync_run_all(state: S<'_>) -> CmdResult<u32> {
+    let pairs: Vec<_> = state
+        .stores
+        .load_sync_pairs()
+        .into_iter()
+        .filter(|p| p.enabled)
+        .collect();
+    let mut count = 0u32;
+    for pair in pairs {
+        if sync::enqueue(
+            state.inner(),
+            &pair.id,
+            Trigger::Manual,
+            RunOptions::default(),
+        ) {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn sync_cancel(state: S<'_>, id: String) -> CmdResult<()> {
+    sync::cancel(state.inner(), &id);
+    Ok(())
+}
+
+/// Resolves the mass-deletion confirmation (FR-SYN-5).
+/// `decision`: `apply` | `skip-deletions` | `cancel`.
+#[tauri::command]
+pub fn sync_confirm(state: S<'_>, id: String, decision: String) -> CmdResult<()> {
+    let decision = match decision.as_str() {
+        "apply" => Decision::Apply,
+        "skip-deletions" => Decision::SkipDeletions,
+        "cancel" => Decision::Cancel,
+        other => {
+            return Err(AppError::new(
+                "invalid",
+                format!("unknown decision '{other}'"),
+            ))
+        }
+    };
+    sync::confirm(state.inner(), &id, decision)
+}
+
+#[tauri::command]
+pub fn sync_history(state: S<'_>, id: String) -> Vec<serde_json::Value> {
+    state.stores.load_sync_history(&id)
+}
+
+#[tauri::command]
+pub fn sync_status(state: S<'_>) -> SyncStatusPayload {
+    state.sync.status()
 }

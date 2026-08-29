@@ -132,7 +132,9 @@ impl DeviceClient {
 
     /// `GET /ping` — succeeds when the session is valid (protocol §5).
     pub async fn ping(&self) -> Result<(), Error> {
-        let resp = self.send(|http, base| http.get(format!("{base}/ping"))).await?;
+        let resp = self
+            .send(|http, base| http.get(format!("{base}/ping")))
+            .await?;
         if resp.status().is_success() {
             Ok(())
         } else {
@@ -191,12 +193,18 @@ impl DeviceClient {
     /// GET a JSON body from `path`.
     pub(crate) async fn get_json<R: DeserializeOwned>(&self, path: &str) -> Result<R, Error> {
         let p = path.to_string();
-        let resp = self.send(move |http, base| http.get(format!("{base}{p}"))).await?;
+        let resp = self
+            .send(move |http, base| http.get(format!("{base}{p}")))
+            .await?;
         json_or_error(resp).await
     }
 
     /// PUT a JSON body, expecting only a success status (no body).
-    pub(crate) async fn put_ok<B: serde::Serialize>(&self, path: &str, body: &B) -> Result<(), Error> {
+    pub(crate) async fn put_ok<B: serde::Serialize>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<(), Error> {
         let p = path.to_string();
         let body = serde_json::to_value(body).map_err(|e| Error::Protocol(e.to_string()))?;
         let resp = self
@@ -222,7 +230,9 @@ impl DeviceClient {
     /// DELETE `path`, expecting a success status.
     pub(crate) async fn delete_ok(&self, path: &str) -> Result<(), Error> {
         let p = path.to_string();
-        let resp = self.send(move |http, base| http.delete(format!("{base}{p}"))).await?;
+        let resp = self
+            .send(move |http, base| http.delete(format!("{base}{p}")))
+            .await?;
         ok_or_error(resp).await
     }
 
@@ -310,7 +320,9 @@ fn pinned_tls_config(device_cert_pem: &str) -> Result<rustls::ClientConfig, Erro
 
 mod pin {
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-    use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms};
+    use rustls::crypto::{
+        verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms,
+    };
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
     use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
 

@@ -1,0 +1,81 @@
+# Produce installers for Windows, macOS and Linux (NFR-PLT-2).
+# Trigger manually or by pushing a version tag (`v0.2.0`).
+#
+# Tauri cannot be cross-compiled from one OS: each job runs on the
+# matching GitHub-hosted runner. Artifacts land on the workflow run
+# (and on a draft GitHub Release when the job has write access).
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            artifact: macos-aarch64
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            artifact: macos-x64
+          - platform: ubuntu-22.04
+            args: ""
+            artifact: linux-x64
+          - platform: windows-latest
+            args: ""
+            artifact: windows-x64
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux bundle dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libudev-dev pkg-config \
+            patchelf file dpkg fakeroot rpm xdg-utils
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.artifact }}
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Digital Paper Companion v__VERSION__
+          releaseBody: See the assets to download and install this version.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/release/bundle/**
+            target/*/release/bundle/**
+          if-no-files-found: warn

@@ -37,6 +37,10 @@ pub enum Error {
     /// Malformed data from the device or from a local state file.
     #[error("protocol/data error: {0}")]
     Protocol(String),
+
+    /// A sync run failed a precondition or configuration check (docs/06 §2).
+    #[error("sync error: {0}")]
+    Sync(String),
 }
 
 impl From<reqwest::Error> for Error {

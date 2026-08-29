@@ -9,10 +9,12 @@ export default function Dialog({
   title,
   onClose,
   children,
+  wide = false,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  wide?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -29,7 +31,7 @@ export default function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-[440px] max-w-[90vw] border border-border bg-bg shadow-xl"
+        className={`${wide ? "w-[720px]" : "w-[440px]"} max-w-[90vw] border border-border bg-bg shadow-xl`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">

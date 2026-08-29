@@ -26,8 +26,9 @@
 │ Titlebar (native or custom per platform)                   │
 ├────────────────────────────────────────────────────────────┤
 │ Toolbar:  breadcrumb (path of current folder) · search ·   │
-│           view toggle (list/icons) │ upload · new folder │ │
-│           ⚡connect · ⟳ sync now · ⚙ settings (icons)       │
+│           view toggle (list/icons) · refresh │ upload ·     │
+│           new folder │ ⇄ sync · ⚡connect · ⚙ settings │    │
+│           ⇅ transfers                                       │
 ├──────────┬─────────────────────────────────────────────────┤
 │ Sidebar  │                                                 │
 │          │                                                 │
@@ -50,10 +51,12 @@
   - *View controls:* list/icon view toggle, sort menu — these apply to the
     active content view;
   - *Actions* (right-aligned monochrome icons with tooltips):
-    **Connect** (opens the connect/pairing dialog, §3.1), **Sync now**
-    (one-click action, progress in the status bar, §3.5), **Settings**
-    (opens the settings dialog, §3.6). Context actions (upload, new
-    folder) appear left of the action group when a folder view is active.
+    four groups, left to right: **look** (view toggle + refresh),
+    **change this folder** (upload, new folder), **device/app**
+    (Sync, Connect, Settings), **activity** (Transfers, far right with
+    a count badge). Sync is a spinning icon while a run is in progress,
+    same pattern as Refresh. Context actions appear when a folder view
+    is active.
 - **Status bar** is permanent: connection state (filled dot = connected,
   hollow = disconnected, half = reconnecting — never color-coded), current
   sync status/progress, battery/storage, and the transfer summary, which

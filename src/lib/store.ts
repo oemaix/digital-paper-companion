@@ -12,6 +12,10 @@ import {
   type Entry,
   type JobSnapshot,
   type AppSettings,
+  type SyncStatus,
+  type SyncPairInfo,
+  type SyncConfirmationRequest,
+  type SyncRunRecord,
 } from "./ipc";
 
 export interface Toast {
@@ -28,9 +32,14 @@ interface AppStore {
   transfers: JobSnapshot[];
   settings: AppSettings | null;
   toasts: Toast[];
+  syncStatus: SyncStatus;
+  syncPairs: SyncPairInfo[] | null;
+  syncConfirmation: SyncConfirmationRequest | null;
+  lastSyncRecord: SyncRunRecord | null;
 
   init: () => Promise<void>;
   refreshEntries: (force?: boolean) => Promise<void>;
+  refreshSyncPairs: () => Promise<void>;
   setTheme: (theme: string) => Promise<void>;
   toast: (text: string, kind?: Toast["kind"]) => void;
   dismissToast: (id: number) => void;
@@ -47,6 +56,10 @@ export const useApp = create<AppStore>((set, get) => ({
   transfers: [],
   settings: null,
   toasts: [],
+  syncStatus: { running: null, queued: [], pending_confirmation: null },
+  syncPairs: null,
+  syncConfirmation: null,
+  lastSyncRecord: null,
 
   init: async () => {
     if (initialized) return;
@@ -68,15 +81,38 @@ export const useApp = create<AppStore>((set, get) => ({
     await listen<JobSnapshot[]>(EVENTS.transferUpdated, (event) => {
       set({ transfers: event.payload });
     });
+    await listen<SyncStatus>(EVENTS.syncUpdated, (event) => {
+      set({
+        syncStatus: event.payload,
+        syncConfirmation: event.payload.pending_confirmation ?? null,
+      });
+    });
+    await listen<SyncConfirmationRequest>(EVENTS.syncConfirmationRequired, (event) => {
+      set({ syncConfirmation: event.payload });
+    });
+    await listen<SyncRunRecord>(EVENTS.syncFinished, (event) => {
+      const r = event.payload;
+      set({ lastSyncRecord: r, syncConfirmation: null });
+      const label =
+        r.result === "ok"
+          ? `Sync finished: ${r.done} action${r.done === 1 ? "" : "s"}`
+          : r.result === "cancelled"
+            ? "Sync cancelled"
+            : `Sync ${r.result}: ${r.done} done, ${r.failed} failed`;
+      get().toast(label, r.result === "failed" ? "error" : "info");
+      void get().refreshSyncPairs();
+    });
 
-    const [version, settings, connection, transfers] = await Promise.all([
+    const [version, settings, connection, transfers, syncStatus] = await Promise.all([
       ipc.appVersion(),
       ipc.getSettings(),
       ipc.connectionState(),
       ipc.transferList(),
+      ipc.syncStatus(),
     ]);
-    set({ version, settings, connection, transfers });
+    set({ version, settings, connection, transfers, syncStatus });
     applyTheme(settings.theme);
+    void get().refreshSyncPairs();
     if (connection.state === "connected") {
       void get().refreshEntries();
     }
@@ -93,6 +129,15 @@ export const useApp = create<AppStore>((set, get) => ({
       get().toast(errorMessage(err), "error");
     } finally {
       set({ entriesLoading: false });
+    }
+  },
+
+  refreshSyncPairs: async () => {
+    try {
+      const syncPairs = await ipc.syncPairs();
+      set({ syncPairs });
+    } catch (err) {
+      console.error("failed to load sync pairs", err);
     }
   },
 

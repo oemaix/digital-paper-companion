@@ -131,9 +131,8 @@ pub async fn cancel(state: &Arc<AppState>, id: u64) {
 pub async fn clear_finished(state: &Arc<AppState>) {
     {
         let mut ts = state.transfers.lock().await;
-        ts.jobs.retain(|j| {
-            matches!(j.snapshot.status, JobStatus::Queued | JobStatus::Running)
-        });
+        ts.jobs
+            .retain(|j| matches!(j.snapshot.status, JobStatus::Queued | JobStatus::Running));
     }
     emit_snapshot(state).await;
 }
@@ -174,7 +173,9 @@ async fn worker_loop(state: Arc<AppState>) {
                 }
             }
         };
-        let Some((id, kind, cancel)) = next else { break };
+        let Some((id, kind, cancel)) = next else {
+            break;
+        };
         emit_snapshot(&state).await;
 
         let uploaded = matches!(kind, JobKind::Upload { .. });
@@ -230,12 +231,10 @@ async fn run_job(
                         .upload_file_content(&doc_id, &file_name, &local_path)
                         .await?
                 }
-                None => {
-                    client
-                        .upload_document(&dest_folder_id, &file_name, &local_path)
-                        .await
-                        .map(|_| ())?
-                }
+                None => client
+                    .upload_document(&dest_folder_id, &file_name, &local_path)
+                    .await
+                    .map(|_| ())?,
             }
             Ok(())
         }

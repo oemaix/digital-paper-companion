@@ -1,33 +1,43 @@
 # Rust
 /target/
+src-tauri/target/
 **/*.rs.bk
 
 # Node / frontend
 node_modules/
 dist/
 
-# Tauri
-src-tauri/gen/schemas/
+# Tauri generated files and leftover installers
+src-tauri/gen/
+*.AppImage
+*.deb
+*.rpm
+*.msi
+*.exe
+*.dmg
 
 # Nix
 result
 result-*
 
-# Scratch / local experiments
-tmp/
-
 # Editor / OS noise
 .DS_Store
 Thumbs.db
 *.swp
+.idea/
 
-# Local env
+# Local env and device credentials (never commit these)
 .env
 .envrc.local
+*.pem
+*.p12
+credentials.json
 
 # Logs
 *.log
 
-# Temporary files
+# Temporary files and in-tree sync state
 tmp/
 temp/
+checkpoints/
+sync-history/

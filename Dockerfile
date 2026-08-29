@@ -26,6 +26,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config \
         wget \
         xdg-utils \
+        patchelf \
+        file \
+        dpkg \
+        fakeroot \
+        rpm \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js 22 (NodeSource)

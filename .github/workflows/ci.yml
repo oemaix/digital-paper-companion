@@ -1,0 +1,51 @@
+# Lint and test on every push/PR (NFR-QLT-4). Release bundles are
+# produced by release.yml — they need a real macOS/Windows runner.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
+  rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+      - name: Install Linux Tauri libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libudev-dev pkg-config
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace

@@ -11,7 +11,7 @@ All app data lives in the platform-standard locations resolved by Tauri:
 | **Client credentials per device** (client ID + RSA private key) | OS keychain (see §2) | PEM/UUID in keychain entry |
 | Pinned device certificate per device | config dir `certs/{serial}.pem` | PEM (public data) |
 | Sync pair configurations | config dir `sync-pairs.json` | JSON |
-| Sync checkpoints | data dir² `checkpoints/{pair_id}.json` | JSON (schema in 06 §7) |
+| Sync checkpoints (per pair and device) | data dir² `checkpoints/{pair_id}@{serial}.json` | JSON (schema in 06 §7) |
 | Sync run history | data dir `sync-history/{pair_id}.jsonl` | JSON lines, capped at 100 runs |
 | Logs | log dir³ `dpc.log` (rotated, 7 files × 5 MB) | text (`tracing`) |
 | Preview cache | OS temp `dpc-preview/` | PDFs, purged on exit |

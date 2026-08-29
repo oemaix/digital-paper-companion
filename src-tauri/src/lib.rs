@@ -7,8 +7,10 @@
 mod commands;
 mod credentials;
 mod error;
+mod scheduler;
 mod state;
 mod stores;
+mod sync;
 mod transfers;
 
 use std::sync::Arc;
@@ -22,8 +24,7 @@ use stores::Stores;
 pub fn run() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -32,10 +33,21 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
-            let stores = Stores::new(config_dir);
+            let data_dir = app.path().app_data_dir()?;
+            let stores = Stores::new(config_dir, data_dir);
             let creds = CredentialStore::new(stores.fallback_credentials_dir());
             let app_state = Arc::new(AppState::new(app.handle().clone(), stores, creds));
             app.manage(app_state.clone());
+
+            // Sync runner (serializes runs) and scheduler (FR-SYN-3/4).
+            let runner_state = app_state.clone();
+            tauri::async_runtime::spawn(async move {
+                sync::runner_loop(runner_state).await;
+            });
+            let scheduler_state = app_state.clone();
+            tauri::async_runtime::spawn(async move {
+                scheduler::scheduler_loop(scheduler_state).await;
+            });
 
             // Auto-connect to the last active device, best effort (FR-CONN-8).
             tauri::async_runtime::spawn(async move {
@@ -74,6 +86,16 @@ pub fn run() {
             commands::transfer_list,
             commands::transfer_cancel,
             commands::transfers_clear_finished,
+            commands::sync_pairs,
+            commands::sync_pair_upsert,
+            commands::sync_pair_delete,
+            commands::sync_preview,
+            commands::sync_run,
+            commands::sync_run_all,
+            commands::sync_cancel,
+            commands::sync_confirm,
+            commands::sync_history,
+            commands::sync_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

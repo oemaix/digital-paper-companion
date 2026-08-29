@@ -66,7 +66,12 @@ Useful scripts (see `package.json`):
 | Script | Purpose |
 |---|---|
 | `npm run dev` | Run the desktop app in development mode (hot reload) |
-| `npm run build` | Build release bundles (`.deb`/`.rpm`/AppImage etc.) |
+| `npm run build` | Build release bundles for **this** OS (`.deb`/`.rpm`/AppImage on Linux) |
+
+Installers for Windows (`.msi`/`.exe`) and macOS (`.dmg`) are produced by
+[`.github/workflows/release.yml`](.github/workflows/release.yml) — Tauri
+cannot be cross-compiled from one OS. After the repo is on GitHub, run
+**Actions → Release → Run workflow**, or push a `v*` tag.
 | `npm run dev:web` | Frontend only, in a browser (no Tauri APIs) |
 | `npm run typecheck` / `lint` / `format` | Frontend checks |
 | `npm run check:rust` | `cargo fmt --check`, `clippy`, `cargo test` |

@@ -58,7 +58,9 @@ impl RegistrationClient {
             .await;
 
         // POST /register/pin -> M1 (device displays a PIN).
-        let m1: M1 = self.post_json("/register/pin", &serde_json::json!({})).await?;
+        let m1: M1 = self
+            .post_json("/register/pin", &serde_json::json!({}))
+            .await?;
         let (started, m2) = flow::start(&m1)?;
 
         // POST /register/hash (M2) -> M3.

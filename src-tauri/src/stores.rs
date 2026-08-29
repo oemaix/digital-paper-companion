@@ -35,6 +35,62 @@ impl Default for Settings {
     }
 }
 
+/// Configuration of one sync pair (docs/06 §1; FR-SYN-1/2/4/8). Stored in
+/// `sync-pairs.json`; engine-facing fields are converted in
+/// [`crate::sync`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncPair {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub local_root: String,
+    #[serde(default = "default_remote_root")]
+    pub remote_root: String,
+    #[serde(default)]
+    pub mode: dpt_core::sync::SyncMode,
+    /// Run automatically when the device connects (FR-SYN-4).
+    #[serde(default)]
+    pub on_connect: bool,
+    /// Run every N minutes while connected (FR-SYN-4).
+    #[serde(default)]
+    pub interval_minutes: Option<u32>,
+    /// Mass-deletion confirmation threshold (FR-SYN-5).
+    #[serde(default = "default_deletion_threshold")]
+    pub deletion_threshold: u32,
+    /// Exclude glob patterns on relpaths (FR-SYN-8).
+    #[serde(default)]
+    pub filters: Vec<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_remote_root() -> String {
+    "Document".into()
+}
+fn default_deletion_threshold() -> u32 {
+    10
+}
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SyncPairsFile {
+    #[serde(default = "default_version")]
+    version: u32,
+    #[serde(default)]
+    pairs: Vec<SyncPair>,
+}
+
+impl Default for SyncPairsFile {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            pairs: Vec::new(),
+        }
+    }
+}
+
 /// A device this app has paired with or connected to before (FR-CONN-7).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnownDevice {
@@ -52,15 +108,20 @@ struct DevicesFile {
     devices: Vec<KnownDevice>,
 }
 
-/// Filesystem-backed store rooted at the app config directory.
+/// Filesystem-backed store rooted at the app config directory; sync
+/// checkpoints and run history live in the data directory (docs/07 §1).
 #[derive(Clone)]
 pub struct Stores {
     config_dir: PathBuf,
+    data_dir: PathBuf,
 }
 
 impl Stores {
-    pub fn new(config_dir: PathBuf) -> Self {
-        Self { config_dir }
+    pub fn new(config_dir: PathBuf, data_dir: PathBuf) -> Self {
+        Self {
+            config_dir,
+            data_dir,
+        }
     }
 
     fn settings_path(&self) -> PathBuf {
@@ -131,6 +192,108 @@ impl Stores {
     pub fn load_cert(&self, serial: &str) -> Result<String, AppError> {
         std::fs::read_to_string(self.cert_path(serial))
             .map_err(|_| AppError::new("no_cert", "no pinned certificate for this device"))
+    }
+
+    // ---- sync pairs, checkpoints, history (docs/07 §1) ----------------------
+
+    fn sync_pairs_path(&self) -> PathBuf {
+        self.config_dir.join("sync-pairs.json")
+    }
+
+    /// Checkpoint per (pair, device): a pair is device-agnostic — each device
+    /// tracks its own sync state against the shared local folder, like one
+    /// cloud account synced by several computers (docs/06 §7).
+    pub fn checkpoint_path(&self, pair_id: &str, device_serial: &str) -> PathBuf {
+        let serial: String = device_serial
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        self.data_dir
+            .join("checkpoints")
+            .join(format!("{pair_id}@{serial}.json"))
+    }
+
+    fn history_path(&self, pair_id: &str) -> PathBuf {
+        self.data_dir
+            .join("sync-history")
+            .join(format!("{pair_id}.jsonl"))
+    }
+
+    pub fn load_sync_pairs(&self) -> Vec<SyncPair> {
+        read_json::<SyncPairsFile>(&self.sync_pairs_path())
+            .unwrap_or_default()
+            .pairs
+    }
+
+    pub fn save_sync_pairs(&self, pairs: &[SyncPair]) -> Result<(), AppError> {
+        write_json_atomic(
+            &self.sync_pairs_path(),
+            &SyncPairsFile {
+                version: 1,
+                pairs: pairs.to_vec(),
+            },
+        )
+    }
+
+    pub fn upsert_sync_pair(&self, pair: SyncPair) -> Result<(), AppError> {
+        let mut pairs = self.load_sync_pairs();
+        if let Some(existing) = pairs.iter_mut().find(|p| p.id == pair.id) {
+            *existing = pair;
+        } else {
+            pairs.push(pair);
+        }
+        self.save_sync_pairs(&pairs)
+    }
+
+    /// Removes a pair together with its per-device checkpoints and history.
+    pub fn remove_sync_pair(&self, pair_id: &str) -> Result<(), AppError> {
+        let mut pairs = self.load_sync_pairs();
+        pairs.retain(|p| p.id != pair_id);
+        self.save_sync_pairs(&pairs)?;
+        if let Ok(dir) = std::fs::read_dir(self.data_dir.join("checkpoints")) {
+            let prefix = format!("{pair_id}@");
+            for entry in dir.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with(&prefix) || name.as_ref() == format!("{pair_id}.json") {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        let _ = std::fs::remove_file(self.history_path(pair_id));
+        Ok(())
+    }
+
+    /// Appends a run record to the pair's history, capped at the last 100
+    /// runs (FR-SYN-7; docs/06 §9).
+    pub fn append_sync_history(
+        &self,
+        pair_id: &str,
+        record: &serde_json::Value,
+    ) -> Result<(), AppError> {
+        let path = self.history_path(pair_id);
+        let mut lines: Vec<String> = std::fs::read_to_string(&path)
+            .map(|s| s.lines().map(str::to_string).collect())
+            .unwrap_or_default();
+        lines.push(serde_json::to_string(record)?);
+        if lines.len() > 100 {
+            let skip = lines.len() - 100;
+            lines.drain(..skip);
+        }
+        write_atomic(&path, (lines.join("\n") + "\n").as_bytes())
+    }
+
+    /// Loads the run history, most recent first.
+    pub fn load_sync_history(&self, pair_id: &str) -> Vec<serde_json::Value> {
+        let Ok(text) = std::fs::read_to_string(self.history_path(pair_id)) else {
+            return Vec::new();
+        };
+        let mut out: Vec<serde_json::Value> = text
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        out.reverse();
+        out
     }
 }
 

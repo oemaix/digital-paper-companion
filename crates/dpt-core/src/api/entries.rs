@@ -58,7 +58,8 @@ impl DeviceClient {
     /// entry (protocol §7.3.1). Paths are form-encoded in the URL (§6.3).
     pub async fn resolve_path(&self, path: &str) -> Result<Entry, Error> {
         let encoded = form_encode(path);
-        self.get_json(&format!("/resolve/entry/path/{encoded}")).await
+        self.get_json(&format!("/resolve/entry/path/{encoded}"))
+            .await
     }
 
     /// Opens a streaming download of a document's PDF bytes (protocol §7.3.4).
@@ -149,7 +150,11 @@ impl DeviceClient {
         let cookie = self.cookie_header().await?;
         let resp = self
             .http()
-            .put(format!("{}/documents/{}/file", self.api_base(), document_id))
+            .put(format!(
+                "{}/documents/{}/file",
+                self.api_base(),
+                document_id
+            ))
             .header(reqwest::header::COOKIE, cookie)
             .multipart(form)
             .send()
@@ -161,7 +166,11 @@ impl DeviceClient {
             let text = resp.text().await.unwrap_or_default();
             Err(Error::Api {
                 status,
-                message: if text.is_empty() { "upload failed".into() } else { text },
+                message: if text.is_empty() {
+                    "upload failed".into()
+                } else {
+                    text
+                },
             })
         }
     }
@@ -207,7 +216,8 @@ impl DeviceClient {
         if let Some(name) = new_name {
             body["file_name"] = serde_json::Value::String(name.to_string());
         }
-        self.put_ok(&format!("/documents/{document_id}"), &body).await
+        self.put_ok(&format!("/documents/{document_id}"), &body)
+            .await
     }
 
     /// Copies a document to another folder, optionally renaming (protocol §7.3.9).

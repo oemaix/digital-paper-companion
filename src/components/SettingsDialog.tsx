@@ -1,25 +1,33 @@
 import { useEffect, useState } from "react";
 import Dialog from "./Dialog";
+import SyncSettings from "./SyncSettings";
 import { useApp } from "../lib/store";
 import { ipc, errorMessage, type DeviceStatus } from "../lib/ipc";
 import { formatBytes } from "../lib/format";
 
-type Tab = "application" | "device";
+export type SettingsTab = "application" | "device" | "sync";
 
 /**
- * Settings dialog with Application and Device tabs
- * (docs/05 §3.3; FR-SET-1/3).
+ * Settings dialog with Application, Device and Sync tabs
+ * (docs/05 §3.3/§3.6; FR-SET-1/3, FR-SYN-1…8).
  */
-export default function SettingsDialog({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>("application");
+export default function SettingsDialog({
+  onClose,
+  initialTab = "application",
+}: {
+  onClose: () => void;
+  initialTab?: SettingsTab;
+}) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
 
   return (
-    <Dialog title="Settings" onClose={onClose}>
+    <Dialog title="Settings" onClose={onClose} wide={tab === "sync"}>
       <div className="mb-4 flex border-b border-border" role="tablist">
         {(
           [
             ["application", "Application"],
             ["device", "Device"],
+            ["sync", "Sync"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -37,7 +45,13 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
           </button>
         ))}
       </div>
-      {tab === "application" ? <ApplicationTab /> : <DeviceTab onClose={onClose} />}
+      {tab === "application" ? (
+        <ApplicationTab />
+      ) : tab === "device" ? (
+        <DeviceTab onClose={onClose} />
+      ) : (
+        <SyncSettings />
+      )}
     </Dialog>
   );
 }
@@ -61,7 +75,7 @@ function ApplicationTab() {
         </select>
       </label>
       <p className="text-xs text-text-secondary">
-        Sync configuration arrives in a later release.
+        Folder sync is configured in the Sync tab.
       </p>
     </div>
   );

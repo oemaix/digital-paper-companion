@@ -78,12 +78,14 @@ export const ConnectIcon = makeIcon(
   </>,
 );
 
+// Horizontal opposing arrows (⇄): visually distinct from the circular
+// RefreshIcon and matching the two-way nature of folder sync.
 export const SyncIcon = makeIcon(
   <>
-    <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-    <path d="M21 3v5h-5" />
-    <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-    <path d="M8 16H3v5" />
+    <path d="m17 2 4 4-4 4" />
+    <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+    <path d="m7 22-4-4 4-4" />
+    <path d="M21 13v1a4 4 0 0 1-4 4H3" />
   </>,
 );
 
@@ -115,6 +117,16 @@ export const DownloadIcon = makeIcon(
     <path d="M12 15V3" />
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
     <path d="m7 10 5 5 5-5" />
+  </>,
+);
+
+/** Bidirectional arrows — the transfer queue, not a one-shot download. */
+export const TransfersIcon = makeIcon(
+  <>
+    <path d="M7 3v12" />
+    <path d="m3 7 4-4 4 4" />
+    <path d="M17 21V9" />
+    <path d="m13 17 4 4 4-4" />
   </>,
 );
 
@@ -170,4 +182,3 @@ export const TabletIcon = makeIcon(
 export const ArrowUpIcon = makeIcon(<path d="m5 12 7-7 7 7M12 19V5" />);
 
 export const SpinnerIcon = makeIcon(<path d="M21 12a9 9 0 1 1-6.22-8.56" />);
-

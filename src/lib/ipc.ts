@@ -7,10 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 // ---- types mirrored from the Rust side -------------------------------------
 
 export type ConnectionState =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reauthenticating";
+  "disconnected" | "connecting" | "connected" | "reauthenticating";
 
 export interface ConnectionPayload {
   state: ConnectionState;
@@ -93,11 +90,117 @@ export interface UploadItem {
   existing_doc_id?: string | null;
 }
 
+// ---- sync (FR-SYN-*) ---------------------------------------------------------
+
+export type SyncMode = "two-way" | "mirror-to-local" | "mirror-to-remote";
+
+export interface SyncPair {
+  id: string;
+  name: string;
+  local_root: string;
+  remote_root: string;
+  mode: SyncMode;
+  on_connect: boolean;
+  interval_minutes?: number | null;
+  deletion_threshold: number;
+  filters: string[];
+  enabled: boolean;
+}
+
+export interface SyncPairInfo extends SyncPair {
+  last_run?: SyncRunRecord | null;
+}
+
+export type SyncActionKind =
+  | "create_local_dir"
+  | "create_remote_dir"
+  | "upload"
+  | "download"
+  | "conflict_resolve"
+  | "delete_local"
+  | "delete_remote"
+  | "delete_local_dir"
+  | "delete_remote_dir"
+  | "adopt"
+  | "forget";
+
+export interface SyncAction {
+  kind: SyncActionKind;
+  relpath: string;
+  winner?: "local" | "remote";
+  keep_copy?: boolean;
+  fetch_copy?: boolean;
+}
+
+export interface SyncPlanSummary {
+  uploads: number;
+  downloads: number;
+  conflicts: number;
+  delete_local: number;
+  delete_remote: number;
+  create_local_dirs: number;
+  create_remote_dirs: number;
+  adopts: number;
+}
+
+export interface SyncPlan {
+  actions: SyncAction[];
+  summary: SyncPlanSummary;
+  warnings: string[];
+}
+
+export interface SyncRunRecord {
+  pair_id: string;
+  /** Serial of the device this run talked to (multi-device hub model). */
+  device_serial?: string;
+  trigger: string;
+  started_at: string;
+  finished_at: string;
+  result: "ok" | "partial" | "cancelled" | "failed";
+  summary?: SyncPlanSummary | null;
+  done: number;
+  failed: number;
+  skipped: number;
+  conflicts: string[];
+  errors: string[];
+  warnings: string[];
+}
+
+export interface SyncRunningStatus {
+  pair_id: string;
+  phase: string;
+  done: number;
+  total: number;
+  current?: string | null;
+}
+
+export interface SyncConfirmationRequest {
+  pair_id: string;
+  pair_name: string;
+  threshold: number;
+  local_deletions: string[];
+  remote_deletions: string[];
+}
+
+export interface SyncStatus {
+  running?: SyncRunningStatus | null;
+  queued: string[];
+  pending_confirmation?: SyncConfirmationRequest | null;
+}
+
+export interface ExcludedSyncAction {
+  kind: SyncActionKind;
+  relpath: string;
+}
+
 /** Event channel names (must match state.rs `events`). */
 export const EVENTS = {
   connectionChanged: "connection:changed",
   entriesInvalidated: "entries:invalidated",
   transferUpdated: "transfer:updated",
+  syncUpdated: "sync:updated",
+  syncConfirmationRequired: "sync:confirmation-required",
+  syncFinished: "sync:finished",
 } as const;
 
 // ---- commands ---------------------------------------------------------------
@@ -151,6 +254,19 @@ export const ipc = {
   transferList: () => invoke<JobSnapshot[]>("transfer_list"),
   transferCancel: (id: number) => invoke<void>("transfer_cancel", { id }),
   transfersClearFinished: () => invoke<void>("transfers_clear_finished"),
+
+  syncPairs: () => invoke<SyncPairInfo[]>("sync_pairs"),
+  syncPairUpsert: (pair: SyncPair) => invoke<SyncPair>("sync_pair_upsert", { pair }),
+  syncPairDelete: (id: string) => invoke<void>("sync_pair_delete", { id }),
+  syncPreview: (id: string) => invoke<SyncPlan>("sync_preview", { id }),
+  syncRun: (id: string, confirmed?: boolean, excluded?: ExcludedSyncAction[]) =>
+    invoke<void>("sync_run", { id, confirmed, excluded }),
+  syncRunAll: () => invoke<number>("sync_run_all"),
+  syncCancel: (id: string) => invoke<void>("sync_cancel", { id }),
+  syncConfirm: (id: string, decision: "apply" | "skip-deletions" | "cancel") =>
+    invoke<void>("sync_confirm", { id, decision }),
+  syncHistory: (id: string) => invoke<SyncRunRecord[]>("sync_history", { id }),
+  syncStatus: () => invoke<SyncStatus>("sync_status"),
 };
 
 /** Normalizes an unknown thrown value into a user-presentable message. */

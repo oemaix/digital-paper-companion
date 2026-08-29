@@ -40,6 +40,7 @@ impl From<dpt_core::Error> for AppError {
             E::CertPinMismatch => "cert_pin_mismatch",
             E::Io(_) => "io",
             E::Protocol(_) => "protocol",
+            E::Sync(_) => "sync",
         };
         tracing::debug!(error = %e, "dpt-core error surfaced to UI");
         AppError::new(code, e.to_string())

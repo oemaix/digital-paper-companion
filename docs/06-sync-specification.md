@@ -17,7 +17,12 @@ snapshot → plan → apply.
 - **Mode** — `TwoWay` | `MirrorToLocal` (device is source of truth) |
   `MirrorToRemote` (computer is source of truth).
 - **Checkpoint** — persisted snapshot of the tree state as of the end of the
-  last successful application of actions (per sync pair).
+  last successful application of actions, kept **per (pair, device serial)**.
+  A pair itself is device-agnostic: whichever device is connected syncs
+  against the pair's local folder using its own checkpoint, so several
+  devices can share one local folder as a hub (like one cloud account synced
+  by multiple computers). Content converges through the shared folder;
+  deletions and conflicts are resolved per device by the normal rules.
 - **Relative path (relpath)** — the identity of a file across all three
   views: path relative to the pair's root, `/`-separated, Unicode **NFC**
   normalized.
@@ -156,8 +161,11 @@ skip deletions, or cancel.
 
 - Order: create dirs → uploads & downloads (interleaved, concurrency 2,
   device-friendly) → deletions → folder deletions (deepest first).
-- Downloads write `*.part` then rename (NFR-REL-2). Uploads use
-  create-entry + put-content with ghost-entry cleanup (FR-TRF-10).
+- Downloads write `*.part` then rename (NFR-REL-2), and set the local file's
+  mtime to the device's `modified_date`: conflict arbitration (§5.2) then
+  compares *edit* times rather than sync times, which matters when several
+  devices share one local folder. Uploads use create-entry + put-content
+  with ghost-entry cleanup (FR-TRF-10).
 - **Checkpoint is updated incrementally**: after each completed action the
   affected relpath's checkpoint record is updated in memory, and the file is
   flushed atomically every N actions and at the end. An interrupted run
@@ -171,8 +179,9 @@ skip deletions, or cancel.
 
 ## 7. Checkpoint format
 
-One JSON file per sync pair (see [07-data-and-security.md](07-data-and-security.md)
-for location), written atomically, schema-versioned:
+One JSON file per (sync pair, device serial) — `{pair_id}@{serial}.json`
+(see [07-data-and-security.md](07-data-and-security.md) for location),
+written atomically, schema-versioned:
 
 ```json
 {

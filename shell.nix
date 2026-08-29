@@ -19,9 +19,15 @@ pkgs.mkShell {
     # Frontend toolchain
     nodejs_22
 
-    # Build helpers
+    # Build helpers (xdg-utils / patchelf / file are required by the
+    # AppImage bundler; dpkg and rpm produce .deb / .rpm).
     pkg-config
     gobject-introspection
+    xdg-utils
+    patchelf
+    file
+    dpkg
+    rpm
   ];
 
   buildInputs = with pkgs; [

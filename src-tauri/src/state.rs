@@ -21,6 +21,9 @@ pub mod events {
     pub const CONNECTION_CHANGED: &str = "connection:changed";
     pub const ENTRIES_INVALIDATED: &str = "entries:invalidated";
     pub const TRANSFER_UPDATED: &str = "transfer:updated";
+    pub const SYNC_UPDATED: &str = "sync:updated";
+    pub const SYNC_CONFIRMATION_REQUIRED: &str = "sync:confirmation-required";
+    pub const SYNC_FINISHED: &str = "sync:finished";
 }
 
 /// High-level connection state (mirrors docs/04 §5.1).
@@ -74,17 +77,23 @@ pub struct AppState {
     pub creds: CredentialStore,
     pub pending: Mutex<Option<PendingPairing>>,
     pub transfers: Mutex<TransferState>,
+    pub sync: crate::sync::SyncRuntime,
+    /// Broadcasts connected/disconnected transitions to the sync scheduler.
+    conn_tx: tokio::sync::watch::Sender<bool>,
     inner: RwLock<Inner>,
 }
 
 impl AppState {
     pub fn new(app: AppHandle, stores: Stores, creds: CredentialStore) -> Self {
+        let (conn_tx, _) = tokio::sync::watch::channel(false);
         Self {
             app,
             stores,
             creds,
             pending: Mutex::new(None),
             transfers: Mutex::new(TransferState::default()),
+            sync: crate::sync::SyncRuntime::default(),
+            conn_tx,
             inner: RwLock::new(Inner {
                 connection: ConnectionState::Disconnected,
                 client: None,
@@ -93,6 +102,14 @@ impl AppState {
                 supervisor: None,
             }),
         }
+    }
+
+    pub fn subscribe_connection(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.conn_tx.subscribe()
+    }
+
+    pub async fn is_connected(&self) -> bool {
+        self.connection_state().await == ConnectionState::Connected
     }
 
     pub async fn connection_state(&self) -> ConnectionState {
@@ -106,6 +123,16 @@ impl AppState {
             serial: inner.context.as_ref().map(|c| c.serial.clone()),
             name: inner.context.as_ref().map(|c| c.name.clone()),
         }
+    }
+
+    /// Serial of the currently connected device, if any.
+    pub async fn connected_serial(&self) -> Option<String> {
+        self.inner
+            .read()
+            .await
+            .context
+            .as_ref()
+            .map(|c| c.serial.clone())
     }
 
     pub async fn client(&self) -> Option<Arc<DeviceClient>> {
@@ -123,6 +150,8 @@ impl AppState {
             let mut inner = self.inner.write().await;
             inner.connection = state;
         }
+        self.conn_tx
+            .send_replace(state == ConnectionState::Connected);
         let payload = self.connection_payload().await;
         let _ = self.app.emit(events::CONNECTION_CHANGED, payload);
     }
@@ -142,7 +171,10 @@ impl AppState {
     }
 
     /// Establishes a connection to a known device and starts the supervisor.
-    pub async fn connect(self: &Arc<Self>, context: DeviceContext) -> Result<(), crate::error::AppError> {
+    pub async fn connect(
+        self: &Arc<Self>,
+        context: DeviceContext,
+    ) -> Result<(), crate::error::AppError> {
         self.set_connection(ConnectionState::Connecting).await;
 
         let client = DeviceClient::connect(
@@ -188,6 +220,7 @@ impl AppState {
         inner.entries = None;
         inner.connection = ConnectionState::Disconnected;
         drop(inner);
+        self.conn_tx.send_replace(false);
         let payload = self.connection_payload().await;
         let _ = self.app.emit(events::CONNECTION_CHANGED, payload);
     }
@@ -208,21 +241,27 @@ async fn supervisor_loop(weak: std::sync::Weak<AppState>) {
     loop {
         tokio::time::sleep(Duration::from_secs(15)).await;
         let Some(state) = weak.upgrade() else { break };
-        let Some(client) = state.client().await else { break };
+        let Some(client) = state.client().await else {
+            break;
+        };
 
         if client.ping().await.is_ok() {
             continue;
         }
 
         // Session may have lapsed; try to refresh it in place first.
-        state.set_connection(ConnectionState::Reauthenticating).await;
+        state
+            .set_connection(ConnectionState::Reauthenticating)
+            .await;
         if client.authenticate().await.is_ok() && client.ping().await.is_ok() {
             state.set_connection(ConnectionState::Connected).await;
             continue;
         }
 
         // Full reconnect with backoff using the stored context.
-        let Some(ctx) = state.context().await else { break };
+        let Some(ctx) = state.context().await else {
+            break;
+        };
         let mut delay = Duration::from_secs(2);
         for _ in 0..5 {
             if weak.upgrade().is_none() {

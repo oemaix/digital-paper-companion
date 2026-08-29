@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import ConnectDialog from "./components/ConnectDialog";
-import SettingsDialog from "./components/SettingsDialog";
+import SettingsDialog, { type SettingsTab } from "./components/SettingsDialog";
+import SyncConfirmDialog from "./components/SyncConfirmDialog";
 import LibraryView from "./components/LibraryView";
 import TransfersPanel from "./components/TransfersPanel";
 import ContextMenu from "./components/ContextMenu";
@@ -8,7 +9,6 @@ import Toasts from "./components/Toasts";
 import {
   ChevronRightIcon,
   ConnectIcon,
-  DownloadIcon,
   FolderIcon,
   FolderPlusIcon,
   GridIcon,
@@ -18,10 +18,12 @@ import {
   SettingsIcon,
   SyncIcon,
   TemplateIcon,
+  TransfersIcon,
   UploadIcon,
 } from "./components/icons";
 import { useApp } from "./lib/store";
 import { useBrowse } from "./lib/browse";
+import { ipc, errorMessage } from "./lib/ipc";
 
 /**
  * Application shell per docs/05 §2:
@@ -44,6 +46,7 @@ export default function App() {
   const browse = useBrowse();
   const [activeView, setActiveView] = useState<ViewId>("library");
   const [dialog, setDialog] = useState<DialogId>(null);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("application");
   const [transfersOpen, setTransfersOpen] = useState(false);
   const [uploadMenu, setUploadMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -80,6 +83,43 @@ export default function App() {
     (t) => t.status === "queued" || t.status === "running",
   );
   const runningJob = app.transfers.find((t) => t.status === "running");
+
+  const openSettings = (tab: SettingsTab) => {
+    setSettingsTab(tab);
+    setDialog("settings");
+  };
+
+  const syncPairCount = app.syncPairs?.length ?? 0;
+  const syncRunning = app.syncStatus.running;
+  // Most recent run: live event wins, otherwise the newest persisted record.
+  const lastSync = useMemo(() => {
+    const persisted = (app.syncPairs ?? [])
+      .map((p) => p.last_run)
+      .filter((r): r is NonNullable<typeof r> => !!r)
+      .sort((a, b) => b.finished_at.localeCompare(a.finished_at))[0];
+    if (app.lastSyncRecord && persisted) {
+      return app.lastSyncRecord.finished_at >= persisted.finished_at
+        ? app.lastSyncRecord
+        : persisted;
+    }
+    return app.lastSyncRecord ?? persisted ?? null;
+  }, [app.syncPairs, app.lastSyncRecord]);
+
+  const syncNow = () => {
+    if (syncPairCount === 0) {
+      openSettings("sync");
+      return;
+    }
+    void ipc.syncRunAll().then(
+      (n) =>
+        app.toast(
+          n === 0
+            ? "No enabled sync pairs"
+            : `Sync started (${n} pair${n === 1 ? "" : "s"})`,
+        ),
+      (err) => app.toast(errorMessage(err), "error"),
+    );
+  };
 
   const connectionLabel: Record<string, string> = {
     disconnected: "Not connected",
@@ -153,27 +193,9 @@ export default function App() {
           </button>
         </div>
 
-        <div className="mx-1 h-5 w-px bg-border" />
-
-        {/* Library actions */}
+        {/* Look at this folder: view mode + reload */}
         <button
-          title="Upload to current folder"
-          disabled={!browsable}
-          onClick={(e) => setUploadMenu({ x: e.clientX, y: e.clientY })}
-          className={toolbarButton}
-        >
-          <UploadIcon />
-        </button>
-        <button
-          title="New folder"
-          disabled={!browsable}
-          onClick={() => browse.setNewFolderOpen(true)}
-          className={toolbarButton}
-        >
-          <FolderPlusIcon />
-        </button>
-        <button
-          title="Refresh"
+          title="Refresh library"
           disabled={!connected}
           onClick={() => void app.refreshEntries(true)}
           className={toolbarButton}
@@ -181,37 +203,70 @@ export default function App() {
           <RefreshIcon className={app.entriesLoading ? "animate-spin" : ""} />
         </button>
 
-        <div className="mx-1 h-5 w-px bg-border" />
+        <div className="mx-2 h-5 w-px bg-border" />
 
-        {/* Global actions */}
+        {/* Change this folder */}
+        <div className="flex items-center gap-0.5" role="group" aria-label="Folder">
+          <button
+            title="Upload to current folder"
+            disabled={!browsable}
+            onClick={(e) => setUploadMenu({ x: e.clientX, y: e.clientY })}
+            className={toolbarButton}
+          >
+            <UploadIcon />
+          </button>
+          <button
+            title="New folder"
+            disabled={!browsable}
+            onClick={() => browse.setNewFolderOpen(true)}
+            className={toolbarButton}
+          >
+            <FolderPlusIcon />
+          </button>
+        </div>
+
+        <div className="mx-2 h-5 w-px bg-border" />
+
+        {/* Device and app */}
+        <div className="flex items-center gap-0.5" role="group" aria-label="Device">
+          <button
+            title={syncPairCount === 0 ? "Set up folder sync" : "Sync now"}
+            disabled={!connected && syncPairCount > 0}
+            onClick={syncNow}
+            className={toolbarButton}
+          >
+            <SyncIcon className={syncRunning ? "animate-spin" : ""} />
+          </button>
+          <button
+            title="Connect to device"
+            onClick={() => setDialog("connect")}
+            className={toolbarButton}
+          >
+            <ConnectIcon />
+          </button>
+          <button
+            title="Settings"
+            onClick={() => openSettings("application")}
+            className={toolbarButton}
+          >
+            <SettingsIcon />
+          </button>
+        </div>
+
+        <div className="mx-2 h-5 w-px bg-border" />
+
+        {/* Activity tray: last, like a badgeable inbox */}
         <button
           title="Transfers"
           onClick={() => setTransfersOpen((v) => !v)}
           className={`${toolbarButton} relative`}
         >
-          <DownloadIcon />
+          <TransfersIcon />
           {activeTransfers.length > 0 && (
             <span className="absolute -right-0.5 -top-0.5 min-w-4 border border-border bg-bg px-0.5 text-center text-[10px] leading-4 tabular-nums">
               {activeTransfers.length}
             </span>
           )}
-        </button>
-        <button
-          title="Connect to device"
-          onClick={() => setDialog("connect")}
-          className={toolbarButton}
-        >
-          <ConnectIcon />
-        </button>
-        <button
-          title="Sync (arrives in a later release)"
-          onClick={() => app.toast("Sync arrives in a later release")}
-          className={toolbarButton}
-        >
-          <SyncIcon />
-        </button>
-        <button title="Settings" onClick={() => setDialog("settings")} className={toolbarButton}>
-          <SettingsIcon />
         </button>
       </header>
 
@@ -275,7 +330,9 @@ export default function App() {
               {runningJob
                 ? `${runningJob.kind === "upload" ? "Uploading" : "Downloading"} “${runningJob.name}”`
                 : "Transfers queued"}
-              {activeTransfers.length > 1 ? ` (+${activeTransfers.length - 1} queued)` : ""}
+              {activeTransfers.length > 1
+                ? ` (+${activeTransfers.length - 1} queued)`
+                : ""}
             </span>
             {runningJob?.progress != null && (
               <span className="inline-block h-1 w-24 border border-border align-middle">
@@ -287,13 +344,47 @@ export default function App() {
             )}
           </button>
         )}
+        {(syncRunning || (syncPairCount > 0 && lastSync)) && (
+          <button
+            onClick={() => openSettings("sync")}
+            className="inline-flex items-center gap-2 hover:text-text"
+          >
+            {syncRunning ? (
+              <>
+                <span>
+                  {syncRunning.phase === "apply" && syncRunning.total > 0
+                    ? `Sync: ${syncRunning.done}/${syncRunning.total}`
+                    : "Sync: preparing…"}
+                </span>
+                {syncRunning.total > 0 && (
+                  <span className="inline-block h-1 w-24 border border-border align-middle">
+                    <span
+                      className="block h-full bg-text"
+                      style={{
+                        width: `${Math.round((syncRunning.done / syncRunning.total) * 100)}%`,
+                      }}
+                    />
+                  </span>
+                )}
+              </>
+            ) : (
+              <span>
+                Sync: {lastSync!.result === "ok" ? "up to date" : lastSync!.result} ·{" "}
+                {new Date(lastSync!.finished_at).toLocaleTimeString()}
+              </span>
+            )}
+          </button>
+        )}
         <span className="ml-auto tabular-nums">v{app.version || "…"}</span>
       </footer>
 
       {/* Panels, dialogs, menus, toasts */}
       {transfersOpen && <TransfersPanel onClose={() => setTransfersOpen(false)} />}
       {dialog === "connect" && <ConnectDialog onClose={() => setDialog(null)} />}
-      {dialog === "settings" && <SettingsDialog onClose={() => setDialog(null)} />}
+      {dialog === "settings" && (
+        <SettingsDialog onClose={() => setDialog(null)} initialTab={settingsTab} />
+      )}
+      {app.syncConfirmation && <SyncConfirmDialog request={app.syncConfirmation} />}
       {uploadMenu && (
         <ContextMenu
           x={uploadMenu.x}
@@ -324,8 +415,8 @@ function EmptyState({
           {connectionState === "connecting" ? "Connecting…" : "No device connected"}
         </h1>
         <p className="mb-4 text-text-secondary">
-          Switch on Wi-Fi on your Digital Paper, make sure it is on the same
-          network, then connect or pair it here.
+          Switch on Wi-Fi on your Digital Paper, make sure it is on the same network, then
+          connect or pair it here.
         </p>
         <button
           onClick={onConnect}
