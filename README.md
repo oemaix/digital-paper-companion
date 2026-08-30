@@ -6,15 +6,25 @@ a replacement for Sony's discontinued official Digital Paper App.
 
 Built with **Rust** and **Tauri 2**; runs on Windows, macOS and Linux.
 
-> Status: early development. See [docs/08-roadmap.md](docs/08-roadmap.md)
-> for the phase plan; the full product definition lives in [docs/](docs/).
+> Pre-release (`0.2.x`). Feature status is below; the phase plan is in
+> [docs/08-roadmap.md](docs/08-roadmap.md). The full product definition
+> lives in [docs/](docs/).
 
-## Features (planned)
+## Features
 
-- One-time PIN pairing and automatic reconnection (Wi-Fi, Bluetooth, USB)
-- Browse, upload, download and organize documents, notes and templates
-- Device settings: clock, owner, standby, Wi-Fi networks, screenshots
-- Two-way folder sync with scheduling, conflict safety and dry-run preview
+| Feature                                                      | Status      |
+| ------------------------------------------------------------ | ----------- |
+| PIN pairing, mDNS / manual connect, auto-reconnect           | Implemented |
+| Browse, search, upload, download, organize documents         | Implemented |
+| Transfer queue (progress, cancel, retry)                     | Implemented |
+| Folder sync: two-way or mirror, preview, schedule, conflicts | Implemented |
+| Device status and set clock from this computer               | Implemented |
+| Notes view (`Document/Note`)                                 | Implemented |
+| Open a document on the device                                | Implemented |
+| Device settings editor, Wi-Fi, screenshots                   | Planned     |
+| Note templates                                               | Planned     |
+| USB Ethernet-over-USB and first-class Bluetooth setup        | Planned     |
+| Automatic Update Check                                       | Planned     |
 
 ## Development
 
@@ -63,9 +73,9 @@ platform (on Linux: WebKitGTK 4.1, GTK 3, libsoup 3, OpenSSL, pkg-config).
 
 Useful scripts (see `package.json`):
 
-| Script | Purpose |
-|---|---|
-| `npm run dev` | Run the desktop app in development mode (hot reload) |
+| Script          | Purpose                                                                 |
+| --------------- | ----------------------------------------------------------------------- |
+| `npm run dev`   | Run the desktop app in development mode (hot reload)                    |
 | `npm run build` | Build release bundles for **this** OS (`.deb`/`.rpm`/AppImage on Linux) |
 
 Installers for Windows (`.msi`/`.exe`) and macOS (`.dmg`) are produced by
