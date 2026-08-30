@@ -26,9 +26,9 @@
 │ Titlebar (native or custom per platform)                   │
 ├────────────────────────────────────────────────────────────┤
 │ Toolbar:  breadcrumb (path of current folder) · search ·   │
-│           view toggle (list/icons) · refresh │ upload ·     │
-│           new folder │ ⇄ sync · ⚡connect · ⚙ settings │    │
-│           ⇅ transfers                                       │
+│           view toggle (list/icons) · refresh │ new folder · │
+│           upload · download · delete │ ⇄ sync · ⚡connect ·  │
+│           ⚙ settings │ ⇅ transfers                          │
 ├──────────┬─────────────────────────────────────────────────┤
 │ Sidebar  │                                                 │
 │          │                                                 │
@@ -52,11 +52,14 @@
     active content view;
   - *Actions* (right-aligned monochrome icons with tooltips):
     four groups, left to right: **look** (view toggle + refresh),
-    **change this folder** (upload, new folder), **device/app**
-    (Sync, Connect, Settings), **activity** (Transfers, far right with
-    a count badge). Sync is a spinning icon while a run is in progress,
-    same pattern as Refresh. Context actions appear when a folder view
-    is active.
+    **this folder** (new folder, upload, download, delete of the current
+    selection), **device/app** (Sync, Connect, Settings), **activity**
+    (Transfers, far right with a count badge). Download asks for a
+    target directory, then enqueues the selected files and folders.
+    Delete opens a confirmation dialog, then removes the items on the
+    device.
+    Sync is a spinning icon while a run is in progress, same pattern
+    as Refresh. Context actions appear when a folder view is active.
 - **Status bar** is permanent: connection state (filled dot = connected,
   hollow = disconnected, half = reconnecting — never color-coded), current
   sync status/progress, battery/storage, and the transfer summary, which

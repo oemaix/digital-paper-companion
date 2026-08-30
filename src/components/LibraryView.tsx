@@ -26,7 +26,6 @@ export default function LibraryView() {
   const browse = useBrowse();
 
   const [menu, setMenu] = useState<{ x: number; y: number; entry: Entry } | null>(null);
-  const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const lastClicked = useRef<string | null>(null);
 
@@ -62,14 +61,14 @@ export default function LibraryView() {
         case "size":
           return ((a.file_size ?? 0) - (b.file_size ?? 0)) * dir;
         case "modified":
-          return (
-            (a.modified_date ?? "").localeCompare(b.modified_date ?? "") * dir
-          );
+          return (a.modified_date ?? "").localeCompare(b.modified_date ?? "") * dir;
         default:
-          return a.entry_name.localeCompare(b.entry_name, undefined, {
-            numeric: true,
-            sensitivity: "base",
-          }) * dir;
+          return (
+            a.entry_name.localeCompare(b.entry_name, undefined, {
+              numeric: true,
+              sensitivity: "base",
+            }) * dir
+          );
       }
     });
   }, [entries, browse.root, browse.path, browse.search, browse.sortKey, browse.sortAsc]);
@@ -148,7 +147,7 @@ export default function LibraryView() {
       { label: "", separator: true },
       {
         label: ids.length > 1 ? `Delete ${ids.length} items…` : "Delete…",
-        onClick: () => setDeleteIds(ids),
+        onClick: () => browse.setDeleteIds(ids),
       },
     ];
   };
@@ -223,11 +222,11 @@ export default function LibraryView() {
         />
       )}
 
-      {deleteIds && (
+      {browse.deleteIds && (
         <DeleteDialog
-          ids={deleteIds}
+          ids={browse.deleteIds}
           entries={entries}
-          onClose={() => setDeleteIds(null)}
+          onClose={() => browse.setDeleteIds(null)}
         />
       )}
       {browse.renameTarget && <RenameDialog entry={browse.renameTarget} />}
@@ -367,7 +366,10 @@ function GridMode({
               ) : (
                 <FileIcon width={28} height={28} />
               )}
-              <span className="w-full truncate text-center text-xs" title={entry.entry_name}>
+              <span
+                className="w-full truncate text-center text-xs"
+                title={entry.entry_name}
+              >
                 {entry.entry_name}
               </span>
             </button>
@@ -399,6 +401,7 @@ function DeleteDialog({
     setBusy(true);
     try {
       await ipc.deleteEntries(ids);
+      useBrowse.getState().setSelection([]);
       toast(`Deleted ${ids.length} item${ids.length > 1 ? "s" : ""}`);
       onClose();
     } catch (err) {
@@ -408,10 +411,13 @@ function DeleteDialog({
   };
 
   return (
-    <Dialog title={`Delete ${ids.length > 1 ? `${ids.length} items` : "item"}`} onClose={onClose}>
+    <Dialog
+      title={`Delete ${ids.length > 1 ? `${ids.length} items` : "item"}`}
+      onClose={onClose}
+    >
       <p className="mb-2">
-        This permanently deletes from the device (folders including their
-        contents). This cannot be undone.
+        This permanently deletes from the device (folders including their contents). This
+        cannot be undone.
       </p>
       <ul className="mb-4 max-h-32 overflow-y-auto border border-border px-2 py-1 text-xs text-text-secondary">
         {names.map((n) => (
@@ -422,7 +428,10 @@ function DeleteDialog({
         {ids.length > names.length && <li>… and {ids.length - names.length} more</li>}
       </ul>
       <div className="flex justify-end gap-2">
-        <button onClick={onClose} className="border border-border px-3 py-1.5 hover:border-text">
+        <button
+          onClick={onClose}
+          className="border border-border px-3 py-1.5 hover:border-text"
+        >
           Cancel
         </button>
         <button
@@ -464,7 +473,10 @@ function RenameDialog({ entry }: { entry: Entry }) {
         className="mb-4 w-full border border-border bg-bg px-2 py-1.5 focus:border-text focus:outline-none"
       />
       <div className="flex justify-end gap-2">
-        <button onClick={close} className="border border-border px-3 py-1.5 hover:border-text">
+        <button
+          onClick={close}
+          className="border border-border px-3 py-1.5 hover:border-text"
+        >
           Cancel
         </button>
         <button
@@ -509,7 +521,10 @@ function NewFolderDialog() {
         className="mb-4 w-full border border-border bg-bg px-2 py-1.5 placeholder:text-text-secondary focus:border-text focus:outline-none"
       />
       <div className="flex justify-end gap-2">
-        <button onClick={close} className="border border-border px-3 py-1.5 hover:border-text">
+        <button
+          onClick={close}
+          className="border border-border px-3 py-1.5 hover:border-text"
+        >
           Cancel
         </button>
         <button

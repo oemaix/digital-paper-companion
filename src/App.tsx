@@ -9,6 +9,7 @@ import Toasts from "./components/Toasts";
 import {
   ChevronRightIcon,
   ConnectIcon,
+  DownloadIcon,
   FolderIcon,
   FolderPlusIcon,
   GridIcon,
@@ -19,6 +20,7 @@ import {
   SyncIcon,
   TemplateIcon,
   TransfersIcon,
+  TrashIcon,
   UploadIcon,
 } from "./components/icons";
 import { useApp } from "./lib/store";
@@ -205,8 +207,16 @@ export default function App() {
 
         <div className="mx-2 h-5 w-px bg-border" />
 
-        {/* Change this folder */}
+        {/* This folder: create, then the in/out pair */}
         <div className="flex items-center gap-0.5" role="group" aria-label="Folder">
+          <button
+            title="New folder"
+            disabled={!browsable}
+            onClick={() => browse.setNewFolderOpen(true)}
+            className={toolbarButton}
+          >
+            <FolderPlusIcon />
+          </button>
           <button
             title="Upload to current folder"
             disabled={!browsable}
@@ -216,12 +226,28 @@ export default function App() {
             <UploadIcon />
           </button>
           <button
-            title="New folder"
-            disabled={!browsable}
-            onClick={() => browse.setNewFolderOpen(true)}
+            title={
+              browse.selection.length === 0
+                ? "Select files or folders to download"
+                : "Download selected to…"
+            }
+            disabled={!browsable || browse.selection.length === 0}
+            onClick={() => void browse.downloadEntries(browse.selection)}
             className={toolbarButton}
           >
-            <FolderPlusIcon />
+            <DownloadIcon />
+          </button>
+          <button
+            title={
+              browse.selection.length === 0
+                ? "Select files or folders to delete"
+                : "Delete selected…"
+            }
+            disabled={!browsable || browse.selection.length === 0}
+            onClick={() => browse.setDeleteIds(browse.selection)}
+            className={toolbarButton}
+          >
+            <TrashIcon />
           </button>
         </div>
 

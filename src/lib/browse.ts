@@ -29,6 +29,7 @@ interface BrowseStore {
   sortKey: SortKey;
   sortAsc: boolean;
   selection: string[];
+  deleteIds: string[] | null;
   conflictPrompt: ConflictPrompt | null;
   renameTarget: Entry | null;
   newFolderOpen: boolean;
@@ -40,6 +41,7 @@ interface BrowseStore {
   setSearch: (search: string) => void;
   setSort: (key: SortKey) => void;
   setSelection: (ids: string[]) => void;
+  setDeleteIds: (ids: string[] | null) => void;
   setRenameTarget: (entry: Entry | null) => void;
   setNewFolderOpen: (open: boolean) => void;
   setConflictPrompt: (prompt: ConflictPrompt | null) => void;
@@ -96,6 +98,7 @@ export const useBrowse = create<BrowseStore>((set, get) => ({
   sortKey: "name",
   sortAsc: true,
   selection: [],
+  deleteIds: null,
   conflictPrompt: null,
   renameTarget: null,
   newFolderOpen: false,
@@ -114,6 +117,7 @@ export const useBrowse = create<BrowseStore>((set, get) => ({
       s.sortKey === key ? { sortAsc: !s.sortAsc } : { sortKey: key, sortAsc: true },
     ),
   setSelection: (selection) => set({ selection }),
+  setDeleteIds: (deleteIds) => set({ deleteIds }),
   setRenameTarget: (renameTarget) => set({ renameTarget }),
   setNewFolderOpen: (newFolderOpen) => set({ newFolderOpen }),
   setConflictPrompt: (conflictPrompt) => set({ conflictPrompt }),
@@ -149,7 +153,9 @@ export const useBrowse = create<BrowseStore>((set, get) => ({
         const entries = app.entries ?? [];
         const siblings = childrenOf(entries, path);
         const byName = new Map(
-          siblings.filter((e) => e.entry_type === "document").map((e) => [e.entry_name, e]),
+          siblings
+            .filter((e) => e.entry_type === "document")
+            .map((e) => [e.entry_name, e]),
         );
         const fresh: UploadItem[] = [];
         const conflicts: ConflictPrompt["conflicts"] = [];
@@ -196,9 +202,7 @@ export const useBrowse = create<BrowseStore>((set, get) => ({
         }
       } else if (policy === "keepboth") {
         const entries = app.entries ?? [];
-        const taken = new Set(
-          childrenOf(entries, get().path).map((e) => e.entry_name),
-        );
+        const taken = new Set(childrenOf(entries, get().path).map((e) => e.entry_name));
         for (const c of prompt.conflicts) {
           const name = uniqueName(c.fileName, taken);
           taken.add(name);
