@@ -93,7 +93,15 @@ cannot be cross-compiled from one OS. After the repo is on GitHub, run
 - Editor: Cursor/VS Code users get extension recommendations from
   `.vscode/extensions.json` (rust-analyzer, Tauri, Tailwind, ESLint, …).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-MIT OR Apache-2.0 (final choice pending, see NFR-QLT-6). This project is
-not affiliated with or endorsed by Sony.
+Licensed under either of
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT license](LICENSE-MIT)
+
+at your option. This project is not affiliated with or endorsed by Sony.
