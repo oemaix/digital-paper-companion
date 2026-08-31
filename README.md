@@ -6,6 +6,20 @@ a replacement for Sony's discontinued official Digital Paper App.
 
 Built with **Rust** and **Tauri 2**; runs on Windows, macOS and Linux.
 
+## Screenshots
+
+Library browser:
+
+![Library browser](docs/images/library.png)
+
+Transfers:
+
+![Transfer queue](docs/images/transfers.png)
+
+Device status:
+
+![Device settings](docs/images/device-settings.png)
+
 > Pre-release (`0.2.x`). Feature status is below; the phase plan is in
 > [docs/08-roadmap.md](docs/08-roadmap.md). The full product definition
 > lives in [docs/](docs/).
