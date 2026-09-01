@@ -14,7 +14,8 @@
         "vadimcn.vscode-lldb",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "bradlc.vscode-tailwindcss"
+        "bradlc.vscode-tailwindcss",
+        "github.vscode-github-actions"
       ],
       "settings": {
         "rust-analyzer.check.command": "clippy",
