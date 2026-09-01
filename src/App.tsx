@@ -3,10 +3,12 @@ import ConnectDialog from "./components/ConnectDialog";
 import SettingsDialog, { type SettingsTab } from "./components/SettingsDialog";
 import SyncConfirmDialog from "./components/SyncConfirmDialog";
 import LibraryView from "./components/LibraryView";
+import TemplatesView from "./components/TemplatesView";
 import TransfersPanel from "./components/TransfersPanel";
 import ContextMenu from "./components/ContextMenu";
 import Toasts from "./components/Toasts";
 import {
+  CameraIcon,
   ChevronRightIcon,
   ConnectIcon,
   DownloadIcon,
@@ -18,6 +20,7 @@ import {
   RefreshIcon,
   SettingsIcon,
   SyncIcon,
+  TabletIcon,
   TemplateIcon,
   TransfersIcon,
   TrashIcon,
@@ -26,24 +29,32 @@ import {
 import { useApp } from "./lib/store";
 import { useBrowse } from "./lib/browse";
 import { ipc, errorMessage } from "./lib/ipc";
+import { useT, type MessageKey } from "./lib/i18n";
 
 /**
  * Application shell per docs/05 §2:
- * - sidebar: content views (Library, Notes, Templates)
+ * - sidebar: device selector (multi-device) + content views
+ *   (Library, Notes, Templates)
  * - toolbar: breadcrumb, search, view-mode toggle, action icons
  * - status bar: connection state, transfer summary, version
  */
 
 const VIEWS = [
-  { id: "library", label: "Library", Icon: FolderIcon, root: "Document" },
-  { id: "notes", label: "Notes", Icon: NoteIcon, root: "Document/Note" },
-  { id: "templates", label: "Templates", Icon: TemplateIcon, root: null },
-] as const;
+  { id: "library", labelKey: "view.library", Icon: FolderIcon, root: "Document" },
+  { id: "notes", labelKey: "view.notes", Icon: NoteIcon, root: "Document/Note" },
+  { id: "templates", labelKey: "view.templates", Icon: TemplateIcon, root: null },
+] as const satisfies readonly {
+  id: string;
+  labelKey: MessageKey;
+  Icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
+  root: string | null;
+}[];
 
 type ViewId = (typeof VIEWS)[number]["id"];
 type DialogId = "connect" | "settings" | null;
 
 export default function App() {
+  const t = useT();
   const app = useApp();
   const browse = useBrowse();
   const [activeView, setActiveView] = useState<ViewId>("library");
@@ -51,6 +62,7 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("application");
   const [transfersOpen, setTransfersOpen] = useState(false);
   const [uploadMenu, setUploadMenu] = useState<{ x: number; y: number } | null>(null);
+  const [screenshotBusy, setScreenshotBusy] = useState(false);
 
   useEffect(() => {
     void app.init();
@@ -66,12 +78,13 @@ export default function App() {
     if (root) browse.setRoot(root);
   };
 
-  // Breadcrumb segments relative to the view root.
+  // Breadcrumb segments relative to the view root. Notes is a flat view
+  // (docs/05 §3.3), so it shows only its label.
   const crumbs = useMemo(() => {
-    if (!view.root) return [];
+    if (!view.root || view.id === "notes") return [];
     const rel = browse.path.slice(view.root.length).split("/").filter(Boolean);
     const out: { label: string; path: string }[] = [
-      { label: view.label, path: view.root },
+      { label: t(view.labelKey), path: view.root },
     ];
     let acc: string = view.root;
     for (const seg of rel) {
@@ -79,7 +92,7 @@ export default function App() {
       out.push({ label: seg, path: acc });
     }
     return out;
-  }, [view, browse.path]);
+  }, [view, browse.path, t]);
 
   const activeTransfers = app.transfers.filter(
     (t) => t.status === "queued" || t.status === "running",
@@ -113,21 +126,39 @@ export default function App() {
       return;
     }
     void ipc.syncRunAll().then(
-      (n) =>
-        app.toast(
-          n === 0
-            ? "No enabled sync pairs"
-            : `Sync started (${n} pair${n === 1 ? "" : "s"})`,
-        ),
+      (n) => app.toast(n === 0 ? t("sync.noPairs") : t("sync.started", { n })),
+      (err) => app.toast(errorMessage(err), "error"),
+    );
+  };
+
+  // Screenshot straight to the clipboard (FR-SET-5). Capturing takes a few
+  // seconds, so announce it immediately — silence reads as a dead button.
+  const copyScreenshot = async () => {
+    setScreenshotBusy(true);
+    app.toast(t("device.screenshotCapturing"));
+    try {
+      await ipc.copyScreenshot();
+      app.toast(t("device.screenshotCopied"));
+    } catch (err) {
+      app.toast(errorMessage(err), "error");
+    } finally {
+      setScreenshotBusy(false);
+    }
+  };
+
+  const switchDevice = (serial: string) => {
+    if (serial === app.connection.serial) return;
+    void ipc.connectKnownDevice(serial).then(
+      () => app.toast(t("connect.connected")),
       (err) => app.toast(errorMessage(err), "error"),
     );
   };
 
   const connectionLabel: Record<string, string> = {
-    disconnected: "Not connected",
-    connecting: "Connecting…",
-    connected: app.connection.name ?? "Connected",
-    reauthenticating: "Reconnecting…",
+    disconnected: t("status.notConnected"),
+    connecting: t("status.connecting"),
+    connected: app.connection.name ?? t("status.connected"),
+    reauthenticating: t("status.reconnecting"),
   };
 
   const toolbarButton =
@@ -138,9 +169,12 @@ export default function App() {
       {/* Toolbar */}
       <header className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-surface px-2">
         {/* Breadcrumb */}
-        <nav className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px]">
+        <nav
+          aria-label={t(view.labelKey)}
+          className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px]"
+        >
           {crumbs.length === 0 ? (
-            <span className="px-1 font-medium">{view.label}</span>
+            <span className="px-1 font-medium">{t(view.labelKey)}</span>
           ) : (
             crumbs.map((c, i) => (
               <span key={c.path} className="flex min-w-0 items-center gap-0.5">
@@ -153,6 +187,7 @@ export default function App() {
                 )}
                 <button
                   onClick={() => browse.navigate(c.path)}
+                  aria-current={i === crumbs.length - 1 ? "location" : undefined}
                   className={`truncate px-1 hover:underline ${
                     i === crumbs.length - 1 ? "font-medium" : "text-text-secondary"
                   }`}
@@ -169,16 +204,21 @@ export default function App() {
           <input
             value={browse.search}
             onChange={(e) => browse.setSearch(e.target.value)}
-            placeholder="Search"
-            aria-label="Search library"
+            placeholder={t("toolbar.search")}
+            aria-label={t("toolbar.searchLibrary")}
             className="w-40 border border-border bg-bg px-2 py-1 text-[13px] placeholder:text-text-secondary focus:border-text focus:outline-none"
           />
         )}
 
         {/* View mode toggle */}
-        <div className="flex border border-border" role="group" aria-label="View mode">
+        <div
+          className="flex border border-border"
+          role="group"
+          aria-label={t("toolbar.viewMode")}
+        >
           <button
-            title="List view"
+            title={t("toolbar.listView")}
+            aria-label={t("toolbar.listView")}
             aria-pressed={browse.viewMode === "list"}
             onClick={() => browse.setViewMode("list")}
             className={`p-1.5 ${browse.viewMode === "list" ? "bg-accent text-accent-foreground" : "text-text-secondary hover:text-text"}`}
@@ -186,7 +226,8 @@ export default function App() {
             <ListIcon />
           </button>
           <button
-            title="Icon view"
+            title={t("toolbar.iconView")}
+            aria-label={t("toolbar.iconView")}
             aria-pressed={browse.viewMode === "grid"}
             onClick={() => browse.setViewMode("grid")}
             className={`p-1.5 ${browse.viewMode === "grid" ? "bg-accent text-accent-foreground" : "text-text-secondary hover:text-text"}`}
@@ -197,20 +238,35 @@ export default function App() {
 
         {/* Look at this folder: view mode + reload */}
         <button
-          title="Refresh library"
+          title={t("toolbar.refresh")}
+          aria-label={t("toolbar.refresh")}
           disabled={!connected}
           onClick={() => void app.refreshEntries(true)}
           className={toolbarButton}
         >
           <RefreshIcon className={app.entriesLoading ? "animate-spin" : ""} />
         </button>
+        <button
+          title={t("toolbar.screenshot")}
+          aria-label={t("toolbar.screenshot")}
+          disabled={!connected || screenshotBusy}
+          onClick={() => void copyScreenshot()}
+          className={toolbarButton}
+        >
+          <CameraIcon className={screenshotBusy ? "animate-pulse" : ""} />
+        </button>
 
         <div className="mx-2 h-5 w-px bg-border" />
 
         {/* This folder: create, then the in/out pair */}
-        <div className="flex items-center gap-0.5" role="group" aria-label="Folder">
+        <div
+          className="flex items-center gap-0.5"
+          role="group"
+          aria-label={t("toolbar.folderGroup")}
+        >
           <button
-            title="New folder"
+            title={t("toolbar.newFolder")}
+            aria-label={t("toolbar.newFolder")}
             disabled={!browsable}
             onClick={() => browse.setNewFolderOpen(true)}
             className={toolbarButton}
@@ -218,7 +274,8 @@ export default function App() {
             <FolderPlusIcon />
           </button>
           <button
-            title="Upload to current folder"
+            title={t("toolbar.upload")}
+            aria-label={t("toolbar.upload")}
             disabled={!browsable}
             onClick={(e) => setUploadMenu({ x: e.clientX, y: e.clientY })}
             className={toolbarButton}
@@ -228,9 +285,10 @@ export default function App() {
           <button
             title={
               browse.selection.length === 0
-                ? "Select files or folders to download"
-                : "Download selected to…"
+                ? t("toolbar.downloadSelect")
+                : t("toolbar.downloadSelected")
             }
+            aria-label={t("toolbar.downloadSelected")}
             disabled={!browsable || browse.selection.length === 0}
             onClick={() => void browse.downloadEntries(browse.selection)}
             className={toolbarButton}
@@ -240,9 +298,10 @@ export default function App() {
           <button
             title={
               browse.selection.length === 0
-                ? "Select files or folders to delete"
-                : "Delete selected…"
+                ? t("toolbar.deleteSelect")
+                : t("toolbar.deleteSelected")
             }
+            aria-label={t("toolbar.deleteSelected")}
             disabled={!browsable || browse.selection.length === 0}
             onClick={() => browse.setDeleteIds(browse.selection)}
             className={toolbarButton}
@@ -254,9 +313,14 @@ export default function App() {
         <div className="mx-2 h-5 w-px bg-border" />
 
         {/* Device and app */}
-        <div className="flex items-center gap-0.5" role="group" aria-label="Device">
+        <div
+          className="flex items-center gap-0.5"
+          role="group"
+          aria-label={t("toolbar.deviceGroup")}
+        >
           <button
-            title={syncPairCount === 0 ? "Set up folder sync" : "Sync now"}
+            title={syncPairCount === 0 ? t("toolbar.syncSetup") : t("toolbar.syncNow")}
+            aria-label={t("toolbar.syncNow")}
             disabled={!connected && syncPairCount > 0}
             onClick={syncNow}
             className={toolbarButton}
@@ -264,14 +328,16 @@ export default function App() {
             <SyncIcon className={syncRunning ? "animate-spin" : ""} />
           </button>
           <button
-            title="Connect to device"
+            title={t("toolbar.connect")}
+            aria-label={t("toolbar.connect")}
             onClick={() => setDialog("connect")}
             className={toolbarButton}
           >
             <ConnectIcon />
           </button>
           <button
-            title="Settings"
+            title={t("toolbar.settings")}
+            aria-label={t("toolbar.settings")}
             onClick={() => openSettings("application")}
             className={toolbarButton}
           >
@@ -283,7 +349,8 @@ export default function App() {
 
         {/* Activity tray: last, like a badgeable inbox */}
         <button
-          title="Transfers"
+          title={t("toolbar.transfers")}
+          aria-label={t("toolbar.transfers")}
           onClick={() => setTransfersOpen((v) => !v)}
           className={`${toolbarButton} relative`}
         >
@@ -297,13 +364,35 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* Sidebar: content views only */}
-        <aside className="w-40 shrink-0 border-r border-border bg-surface p-2">
-          <nav className="flex flex-col gap-0.5">
-            {VIEWS.map(({ id, label, Icon }) => (
+        {/* Sidebar: device selector (FR-CONN-7) + content views */}
+        <aside className="flex w-40 shrink-0 flex-col border-r border-border bg-surface p-2">
+          {app.knownDevices.length > 1 && (
+            <label className="mb-2 flex flex-col gap-1">
+              <span className="flex items-center gap-1.5 px-1 text-[11px] uppercase tracking-wide text-text-secondary">
+                <TabletIcon width={12} height={12} />
+                {t("sidebar.device")}
+              </span>
+              <select
+                value={app.connection.serial ?? ""}
+                onChange={(e) => e.target.value && switchDevice(e.target.value)}
+                aria-label={t("sidebar.switchDevice")}
+                className="w-full border border-border bg-bg px-1.5 py-1 text-xs focus:border-text focus:outline-none"
+              >
+                {!app.connection.serial && <option value="">—</option>}
+                {app.knownDevices.map((d) => (
+                  <option key={d.serial} value={d.serial}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <nav className="flex flex-col gap-0.5" aria-label={t("sidebar.device")}>
+            {VIEWS.map(({ id, labelKey, Icon }) => (
               <button
                 key={id}
                 onClick={() => switchView(id)}
+                aria-current={id === activeView ? "page" : undefined}
                 className={`flex items-center gap-2 px-2 py-1.5 text-left text-[13px] ${
                   id === activeView
                     ? "bg-accent text-accent-foreground"
@@ -311,7 +400,7 @@ export default function App() {
                 }`}
               >
                 <Icon />
-                {label}
+                {t(labelKey)}
               </button>
             ))}
           </nav>
@@ -325,14 +414,9 @@ export default function App() {
               onConnect={() => setDialog("connect")}
             />
           ) : view.root ? (
-            <LibraryView />
+            <LibraryView notes={view.id === "notes"} />
           ) : (
-            <div className="flex flex-1 items-center justify-center text-center text-text-secondary">
-              <div>
-                <h1 className="mb-1 text-xl font-semibold text-text">Templates</h1>
-                <p>Template management arrives in a later release.</p>
-              </div>
-            </div>
+            <TemplatesView />
           )}
         </main>
       </div>
@@ -354,10 +438,12 @@ export default function App() {
           >
             <span>
               {runningJob
-                ? `${runningJob.kind === "upload" ? "Uploading" : "Downloading"} “${runningJob.name}”`
-                : "Transfers queued"}
+                ? runningJob.kind === "download"
+                  ? t("status.downloading", { name: runningJob.name })
+                  : t("status.uploading", { name: runningJob.name })
+                : t("status.transfersQueued")}
               {activeTransfers.length > 1
-                ? ` (+${activeTransfers.length - 1} queued)`
+                ? t("status.moreQueued", { n: activeTransfers.length - 1 })
                 : ""}
             </span>
             {runningJob?.progress != null && (
@@ -379,8 +465,11 @@ export default function App() {
               <>
                 <span>
                   {syncRunning.phase === "apply" && syncRunning.total > 0
-                    ? `Sync: ${syncRunning.done}/${syncRunning.total}`
-                    : "Sync: preparing…"}
+                    ? t("status.syncProgress", {
+                        done: syncRunning.done,
+                        total: syncRunning.total,
+                      })
+                    : t("status.syncPreparing")}
                 </span>
                 {syncRunning.total > 0 && (
                   <span className="inline-block h-1 w-24 border border-border align-middle">
@@ -395,7 +484,10 @@ export default function App() {
               </>
             ) : (
               <span>
-                Sync: {lastSync!.result === "ok" ? "up to date" : lastSync!.result} ·{" "}
+                {lastSync!.result === "ok"
+                  ? t("status.syncUpToDate")
+                  : t("status.syncResult", { result: lastSync!.result })}
+                {" · "}
                 {new Date(lastSync!.finished_at).toLocaleTimeString()}
               </span>
             )}
@@ -416,8 +508,14 @@ export default function App() {
           x={uploadMenu.x}
           y={uploadMenu.y}
           items={[
-            { label: "Upload files…", onClick: () => void browse.pickAndUploadFiles() },
-            { label: "Upload folder…", onClick: () => void browse.pickAndUploadFolder() },
+            {
+              label: t("toolbar.uploadFiles"),
+              onClick: () => void browse.pickAndUploadFiles(),
+            },
+            {
+              label: t("toolbar.uploadFolder"),
+              onClick: () => void browse.pickAndUploadFolder(),
+            },
           ]}
           onClose={() => setUploadMenu(null)}
         />
@@ -434,21 +532,19 @@ function EmptyState({
   connectionState: string;
   onConnect: () => void;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-1 items-center justify-center">
       <div className="max-w-sm text-center">
         <h1 className="mb-2 text-xl font-semibold">
-          {connectionState === "connecting" ? "Connecting…" : "No device connected"}
+          {connectionState === "connecting" ? t("empty.connecting") : t("empty.noDevice")}
         </h1>
-        <p className="mb-4 text-text-secondary">
-          Switch on Wi-Fi on your Digital Paper, make sure it is on the same network, then
-          connect or pair it here.
-        </p>
+        <p className="mb-4 text-text-secondary">{t("empty.hint")}</p>
         <button
           onClick={onConnect}
           className="border border-accent bg-accent px-4 py-2 text-accent-foreground"
         >
-          Connect to device
+          {t("empty.connectButton")}
         </button>
       </div>
     </div>

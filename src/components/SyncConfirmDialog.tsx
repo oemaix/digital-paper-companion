@@ -1,6 +1,7 @@
 import Dialog from "./Dialog";
 import { useApp } from "../lib/store";
 import { ipc, errorMessage, type SyncConfirmationRequest } from "../lib/ipc";
+import { useT } from "../lib/i18n";
 
 /**
  * Mass-deletion gate (docs/06 §5.6; FR-SYN-5): a paused sync run lists the
@@ -12,6 +13,7 @@ export default function SyncConfirmDialog({
 }: {
   request: SyncConfirmationRequest;
 }) {
+  const t = useT();
   const toast = useApp((s) => s.toast);
 
   const decide = async (decision: "apply" | "skip-deletions" | "cancel") => {
@@ -45,35 +47,37 @@ export default function SyncConfirmDialog({
   const total = request.local_deletions.length + request.remote_deletions.length;
 
   return (
-    <Dialog title="Confirm deletions" onClose={() => void decide("cancel")} wide>
+    <Dialog title={t("syncConfirm.title")} onClose={() => void decide("cancel")} wide>
       <div className="flex flex-col gap-3 text-[13px]">
         <p>
-          Syncing “{request.pair_name}” would delete <strong>{total}</strong> items — more
-          than the configured threshold of {request.threshold}. Deletions on the device
-          can't be undone.
+          {t("syncConfirm.body", {
+            name: request.pair_name,
+            total,
+            threshold: request.threshold,
+          })}
         </p>
         <div className="flex gap-3">
-          {list("On this computer", request.local_deletions)}
-          {list("On the device", request.remote_deletions)}
+          {list(t("syncConfirm.onComputer"), request.local_deletions)}
+          {list(t("syncConfirm.onDevice"), request.remote_deletions)}
         </div>
         <div className="flex gap-2 border-t border-border pt-3">
           <button
             onClick={() => void decide("apply")}
             className="border border-accent bg-accent px-3 py-1.5 text-accent-foreground"
           >
-            Delete and continue
+            {t("syncConfirm.apply")}
           </button>
           <button
             onClick={() => void decide("skip-deletions")}
             className="border border-border px-3 py-1.5 hover:border-text"
           >
-            Sync without deleting
+            {t("syncConfirm.skip")}
           </button>
           <button
             onClick={() => void decide("cancel")}
             className="ml-auto border border-border px-3 py-1.5 text-text-secondary hover:border-text hover:text-text"
           >
-            Cancel run
+            {t("syncConfirm.cancelRun")}
           </button>
         </div>
       </div>

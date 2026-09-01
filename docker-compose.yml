@@ -31,14 +31,26 @@ services:
     environment:
       DISPLAY: "${DISPLAY:-:0}"
       WAYLAND_DISPLAY: "${WAYLAND_DISPLAY:-}"
+      # Forwarded so X11 auth works without `xhost` when the host exports
+      # an xauth cookie (file must be reachable via one of the mounts).
+      XAUTHORITY: "${XAUTHORITY:-}"
+      XDG_RUNTIME_DIR: "${XDG_RUNTIME_DIR:-}"
+      # WebKitGTK's DMA-BUF renderer needs GPU access the container doesn't
+      # have; without this the Tauri window can come up blank/white.
+      WEBKIT_DISABLE_DMABUF_RENDERER: "1"
     volumes:
       - .:/workspace
       - cargo-registry:/usr/local/cargo/registry
       - target:/workspace/target
       - node-modules:/workspace/node_modules
       # X11 socket for running the Tauri window from inside the container
-      # (requires `xhost +local:` on the host; see README).
+      # (requires `xhost +local:` on the host, or a forwarded XAUTHORITY
+      # cookie; see README).
       - /tmp/.X11-unix:/tmp/.X11-unix
+      # Wayland socket + xauth cookie live here on most systems. Mounted at
+      # the same path so WAYLAND_DISPLAY/XAUTHORITY stay valid; falls back
+      # to a throwaway path when the host doesn't set XDG_RUNTIME_DIR.
+      - ${XDG_RUNTIME_DIR:-/tmp/.dpc-no-runtime-dir}:${XDG_RUNTIME_DIR:-/tmp/.dpc-no-runtime-dir}
     stdin_open: true
     tty: true
 

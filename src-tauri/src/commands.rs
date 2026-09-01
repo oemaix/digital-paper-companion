@@ -42,6 +42,14 @@ pub fn set_theme(state: S<'_>, theme: String) -> CmdResult<()> {
     state.stores.save_settings(&settings)
 }
 
+/// Persists the UI language (`"system"` or a locale code; NFR-I18N-1).
+#[tauri::command]
+pub fn set_language(state: S<'_>, language: String) -> CmdResult<()> {
+    let mut settings = state.stores.load_settings();
+    settings.language = language;
+    state.stores.save_settings(&settings)
+}
+
 // ---- discovery & connection -------------------------------------------------
 
 #[tauri::command]
@@ -463,6 +471,291 @@ pub async fn set_device_clock(state: S<'_>) -> CmdResult<()> {
     let client = state.require_client().await?;
     client.set_clock_now().await?;
     Ok(())
+}
+
+// ---- device configuration (FR-SET-2) ----------------------------------------
+
+/// One key/value from `GET /system/configs/` — values are flattened to
+/// strings so the UI can render known keys as form fields and the rest as a
+/// generic table (FR-SET-2).
+#[derive(Serialize)]
+pub struct ConfigEntry {
+    pub key: String,
+    pub value: String,
+}
+
+fn config_value_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        // Some firmwares nest each setting as `{ "value": ... }`.
+        serde_json::Value::Object(m) if m.contains_key("value") => {
+            config_value_to_string(&m["value"])
+        }
+        other => other.to_string(),
+    }
+}
+
+/// All device configuration values, sorted by key (FR-SET-2).
+#[tauri::command]
+pub async fn device_configs(state: S<'_>) -> CmdResult<Vec<ConfigEntry>> {
+    let client = state.require_client().await?;
+    let raw = client.configs().await?;
+    let obj = raw
+        .as_object()
+        .ok_or_else(|| AppError::new("protocol", "unexpected /system/configs/ shape"))?;
+    let mut out: Vec<ConfigEntry> = obj
+        .iter()
+        .map(|(key, value)| ConfigEntry {
+            key: key.clone(),
+            value: config_value_to_string(value),
+        })
+        .collect();
+    out.sort_by(|a, b| a.key.cmp(&b.key));
+    Ok(out)
+}
+
+/// Writes one configuration value (FR-SET-2).
+#[tauri::command]
+pub async fn set_device_config(state: S<'_>, key: String, value: String) -> CmdResult<()> {
+    let key = key.trim();
+    if key.is_empty() || key.contains(['/', '?', '#']) || key.contains(char::is_whitespace) {
+        return Err(AppError::new("invalid", "invalid configuration key"));
+    }
+    let client = state.require_client().await?;
+    client.set_config(key, &value).await?;
+    Ok(())
+}
+
+// ---- screenshots (FR-SET-5) ---------------------------------------------------
+
+/// Captures the device screen and puts it on the OS clipboard (FR-SET-5).
+/// The device's PNG is decoded to raw RGBA because clipboards want bitmaps;
+/// the clipboard-manager plugin handles per-platform quirks and lifetime.
+#[tauri::command]
+pub async fn copy_screenshot_to_clipboard(app: tauri::AppHandle, state: S<'_>) -> CmdResult<()> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let client = state.require_client().await?;
+    let png = client.screenshot_png().await?;
+    let rgba = tokio::task::spawn_blocking(move || {
+        image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+            .map(|img| img.into_rgba8())
+    })
+    .await
+    .map_err(|e| AppError::new("io", e.to_string()))?
+    .map_err(|e| AppError::new("screenshot", format!("cannot decode screenshot: {e}")))?;
+
+    let (width, height) = rgba.dimensions();
+    app.clipboard()
+        .write_image(&tauri::image::Image::new_owned(
+            rgba.into_raw(),
+            width,
+            height,
+        ))
+        .map_err(|e| AppError::new("clipboard", e.to_string()))?;
+    Ok(())
+}
+
+// ---- Wi-Fi management (FR-SET-4) ----------------------------------------------
+
+#[tauri::command]
+pub async fn wifi_enabled(state: S<'_>) -> CmdResult<bool> {
+    let client = state.require_client().await?;
+    Ok(client.wifi_enabled().await?)
+}
+
+/// Switches the device's Wi-Fi radio. Turning it off while connected over
+/// Wi-Fi drops the connection — the UI warns first.
+#[tauri::command]
+pub async fn set_wifi_enabled(state: S<'_>, on: bool) -> CmdResult<()> {
+    let client = state.require_client().await?;
+    client.set_wifi_enabled(on).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn wifi_stored_networks(
+    state: S<'_>,
+) -> CmdResult<Vec<dpt_core::api::wifi::AccessPoint>> {
+    let client = state.require_client().await?;
+    Ok(client.stored_access_points().await?)
+}
+
+#[tauri::command]
+pub async fn wifi_scan(state: S<'_>) -> CmdResult<Vec<dpt_core::api::wifi::AccessPoint>> {
+    let client = state.require_client().await?;
+    Ok(client.scan_access_points().await?)
+}
+
+/// Adds/configures a network. The passphrase goes straight to the device
+/// and is never stored by the app (NFR-SEC-5).
+#[tauri::command]
+pub async fn wifi_add_network(
+    state: S<'_>,
+    config: dpt_core::api::wifi::WifiNetworkConfig,
+) -> CmdResult<()> {
+    let client = state.require_client().await?;
+    client.register_access_point(&config).await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn wifi_remove_network(state: S<'_>, ssid: String, security: String) -> CmdResult<()> {
+    let client = state.require_client().await?;
+    client.delete_access_point(&ssid, &security).await?;
+    Ok(())
+}
+
+// ---- note templates (FR-BRW-7, FR-TRF-6) ---------------------------------------
+
+#[tauri::command]
+pub async fn list_templates(state: S<'_>) -> CmdResult<Vec<dpt_core::model::NoteTemplate>> {
+    let client = state.require_client().await?;
+    Ok(client.list_templates().await?)
+}
+
+/// Enqueues template uploads (one per PDF path); the template name is the
+/// file name without extension. Runs through the normal transfer queue
+/// (FR-TRF-6, docs/05 §3.4).
+#[tauri::command]
+pub async fn upload_templates(state: S<'_>, paths: Vec<String>) -> CmdResult<Vec<u64>> {
+    let mut kinds = Vec::new();
+    for p in paths {
+        let path = PathBuf::from(&p);
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| AppError::new("io", "invalid file path"))?
+            .to_string();
+        if !file_name.to_lowercase().ends_with(".pdf") {
+            return Err(AppError::new(
+                "invalid",
+                format!("'{file_name}' is not a PDF — templates must be PDF files"),
+            ));
+        }
+        let template_name = path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&file_name)
+            .to_string();
+        kinds.push((
+            file_name.clone(),
+            JobKind::UploadTemplate {
+                local_path: path,
+                template_name,
+                file_name,
+            },
+        ));
+    }
+    Ok(transfers::enqueue(state.inner(), kinds).await)
+}
+
+/// Deletes a template (irreversible on the device; the UI confirms first).
+#[tauri::command]
+pub async fn delete_template(state: S<'_>, id: String) -> CmdResult<()> {
+    let client = state.require_client().await?;
+    client.delete_template(&id).await?;
+    Ok(())
+}
+
+// ---- USB connection (FR-CONN-4) -------------------------------------------------
+
+/// Serial ports that may be a Digital Paper in CDC ACM mode.
+#[tauri::command]
+pub async fn usb_ports() -> CmdResult<Vec<dpt_core::usb::UsbCandidate>> {
+    tokio::task::spawn_blocking(dpt_core::usb::list_candidate_ports)
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))?
+        .map_err(AppError::from)
+}
+
+/// Writes the Ethernet-over-USB mode switch to a serial port. `mode` is
+/// `"rndis"`, `"cdc-ecm"` or empty for the host-OS default (protocol §2.1).
+/// Returns the mode that was applied.
+#[tauri::command]
+pub async fn usb_switch_mode(port: String, mode: Option<String>) -> CmdResult<String> {
+    use dpt_core::usb::UsbNetMode;
+    let mode = match mode.as_deref() {
+        Some("rndis") => UsbNetMode::Rndis,
+        Some("cdc-ecm") => UsbNetMode::CdcEcm,
+        _ => UsbNetMode::for_host_os(),
+    };
+    tokio::task::spawn_blocking(move || dpt_core::usb::switch_mode(&port, mode))
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))?
+        .map_err(AppError::from)?;
+    Ok(match mode {
+        UsbNetMode::Rndis => "rndis".into(),
+        UsbNetMode::CdcEcm => "cdc-ecm".into(),
+    })
+}
+
+// ---- credential import (FR-REG-6) -------------------------------------------------
+
+/// Credential pairs found in the default Sony / dptrp1 locations
+/// (docs/07 §2).
+#[tauri::command]
+pub async fn import_candidates() -> CmdResult<Vec<crate::import::ImportCandidate>> {
+    tokio::task::spawn_blocking(crate::import::find_candidates)
+        .await
+        .map_err(|e| AppError::new("io", e.to_string()))
+}
+
+/// Imports credentials from `deviceid.dat`/`privatekey.dat`, validates them
+/// by authenticating against the device at `address`, then stores them
+/// through the normal path (keychain + pinned cert + registry) and connects.
+/// The certificate is obtained trust-on-first-use since Sony's app never
+/// stored one (docs/07 §2). Source files are left untouched.
+#[tauri::command]
+pub async fn import_credentials(
+    state: S<'_>,
+    deviceid_path: String,
+    privatekey_path: String,
+    address: String,
+) -> CmdResult<ConnectionPayload> {
+    let credentials =
+        crate::import::read_credentials(Path::new(&deviceid_path), Path::new(&privatekey_path))?;
+
+    let addr = DeviceAddr::new(address.clone());
+    let info = DeviceClient::probe(&addr).await?;
+    let serial = info.serial_number.clone();
+    let name = info
+        .model_name
+        .clone()
+        .unwrap_or_else(|| "Digital Paper".to_string());
+
+    let cert_pem = dpt_core::client::fetch_server_certificate(&addr).await?;
+
+    // Validate before storing anything: connecting authenticates with the
+    // imported key against the TOFU-pinned certificate.
+    let ctx = DeviceContext {
+        serial: serial.clone(),
+        name: name.clone(),
+        addr,
+        cert_pem: cert_pem.clone(),
+        credentials: credentials.clone(),
+    };
+    let app_state = state.inner().clone();
+    if let Err(e) = app_state.connect(ctx).await {
+        app_state.disconnect().await;
+        return Err(AppError::new(
+            "import_auth_failed",
+            format!(
+                "the device rejected the imported credentials: {}",
+                e.message
+            ),
+        ));
+    }
+
+    state.creds.save(&serial, &credentials)?;
+    state.stores.save_cert(&serial, &cert_pem)?;
+    state.stores.upsert_device(KnownDevice {
+        serial,
+        name,
+        model: info.model_name,
+        last_address: Some(address),
+    })?;
+    Ok(app_state.connection_payload().await)
 }
 
 // ---- transfers (FR-TRF-*) ----------------------------------------------------

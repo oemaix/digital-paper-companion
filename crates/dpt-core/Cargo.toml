@@ -41,5 +41,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 
+# USB CDC ACM serial detection + Ethernet-over-USB mode switch (FR-CONN-4).
+# Needs libudev on Linux (installed in CI, Docker image and shell.nix).
+serialport = "4"
+
 [dev-dependencies]
 tempfile = "3"

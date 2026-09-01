@@ -12,11 +12,13 @@ import {
   type Entry,
   type JobSnapshot,
   type AppSettings,
+  type KnownDevice,
   type SyncStatus,
   type SyncPairInfo,
   type SyncConfirmationRequest,
   type SyncRunRecord,
 } from "./ipc";
+import { t, useI18n } from "./i18n";
 
 export interface Toast {
   id: number;
@@ -31,6 +33,7 @@ interface AppStore {
   entriesLoading: boolean;
   transfers: JobSnapshot[];
   settings: AppSettings | null;
+  knownDevices: KnownDevice[];
   toasts: Toast[];
   syncStatus: SyncStatus;
   syncPairs: SyncPairInfo[] | null;
@@ -40,7 +43,9 @@ interface AppStore {
   init: () => Promise<void>;
   refreshEntries: (force?: boolean) => Promise<void>;
   refreshSyncPairs: () => Promise<void>;
+  refreshKnownDevices: () => Promise<void>;
   setTheme: (theme: string) => Promise<void>;
+  setLanguage: (language: string) => Promise<void>;
   toast: (text: string, kind?: Toast["kind"]) => void;
   dismissToast: (id: number) => void;
 }
@@ -55,6 +60,7 @@ export const useApp = create<AppStore>((set, get) => ({
   entriesLoading: false,
   transfers: [],
   settings: null,
+  knownDevices: [],
   toasts: [],
   syncStatus: { running: null, queued: [], pending_confirmation: null },
   syncPairs: null,
@@ -70,6 +76,8 @@ export const useApp = create<AppStore>((set, get) => ({
       set({ connection: event.payload });
       if (event.payload.state === "connected" && prev !== "connected") {
         void get().refreshEntries(true);
+        // A pairing/import may have added a device (FR-CONN-7).
+        void get().refreshKnownDevices();
       }
       if (event.payload.state === "disconnected") {
         set({ entries: null });
@@ -95,10 +103,14 @@ export const useApp = create<AppStore>((set, get) => ({
       set({ lastSyncRecord: r, syncConfirmation: null });
       const label =
         r.result === "ok"
-          ? `Sync finished: ${r.done} action${r.done === 1 ? "" : "s"}`
+          ? t("sync.finishedToast", { n: r.done })
           : r.result === "cancelled"
-            ? "Sync cancelled"
-            : `Sync ${r.result}: ${r.done} done, ${r.failed} failed`;
+            ? t("sync.cancelledToast")
+            : t("sync.failedToast", {
+                result: r.result,
+                done: r.done,
+                failed: r.failed,
+              });
       get().toast(label, r.result === "failed" ? "error" : "info");
       void get().refreshSyncPairs();
     });
@@ -112,7 +124,9 @@ export const useApp = create<AppStore>((set, get) => ({
     ]);
     set({ version, settings, connection, transfers, syncStatus });
     applyTheme(settings.theme);
+    useI18n.getState().setLanguageSetting(settings.language ?? "system");
     void get().refreshSyncPairs();
+    void get().refreshKnownDevices();
     if (connection.state === "connected") {
       void get().refreshEntries();
     }
@@ -141,11 +155,27 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
+  refreshKnownDevices: async () => {
+    try {
+      const knownDevices = await ipc.knownDevices();
+      set({ knownDevices });
+    } catch (err) {
+      console.error("failed to load known devices", err);
+    }
+  },
+
   setTheme: async (theme) => {
     await ipc.setTheme(theme);
     const settings = get().settings;
     set({ settings: settings ? { ...settings, theme } : settings });
     applyTheme(theme);
+  },
+
+  setLanguage: async (language) => {
+    await ipc.setLanguage(language);
+    const settings = get().settings;
+    set({ settings: settings ? { ...settings, language } : settings });
+    useI18n.getState().setLanguageSetting(language);
   },
 
   toast: (text, kind = "info") => {

@@ -66,7 +66,7 @@ export interface DeviceStatus {
 
 export interface JobSnapshot {
   id: number;
-  kind: "upload" | "download";
+  kind: "upload" | "download" | "upload-template";
   name: string;
   status: "queued" | "running" | "done" | "failed" | "cancelled";
   progress?: number | null;
@@ -76,8 +76,53 @@ export interface JobSnapshot {
 export interface AppSettings {
   version: number;
   theme: string;
+  language: string;
   last_active_serial?: string | null;
 }
+
+export interface NoteTemplate {
+  template_name: string;
+  note_template_id: string;
+}
+
+export interface ConfigEntry {
+  key: string;
+  value: string;
+}
+
+export interface AccessPoint {
+  ssid: string;
+  security: string;
+  extra: Record<string, unknown>;
+}
+
+export interface WifiNetworkConfig {
+  ssid: string;
+  security: string;
+  passwd: string;
+  dhcp: boolean;
+  static_address: string;
+  gateway: string;
+  network_mask: string;
+  dns1: string;
+  dns2: string;
+  proxy: boolean;
+}
+
+export interface UsbCandidate {
+  port: string;
+  label: string;
+  likely_digital_paper: boolean;
+}
+
+export interface ImportCandidate {
+  deviceid_path: string;
+  privatekey_path: string;
+  origin: "sony" | "dptrp1" | string;
+}
+
+/** Default device address over Bluetooth PAN (protocol §2; FR-CONN-3). */
+export const BLUETOOTH_PAN_ADDRESS = "172.25.47.1";
 
 export interface AppError {
   code: string;
@@ -197,6 +242,7 @@ export interface ExcludedSyncAction {
 export const EVENTS = {
   connectionChanged: "connection:changed",
   entriesInvalidated: "entries:invalidated",
+  templatesInvalidated: "templates:invalidated",
   transferUpdated: "transfer:updated",
   syncUpdated: "sync:updated",
   syncConfirmationRequired: "sync:confirmation-required",
@@ -209,6 +255,7 @@ export const ipc = {
   appVersion: () => invoke<string>("app_version"),
   getSettings: () => invoke<AppSettings>("get_settings"),
   setTheme: (theme: string) => invoke<void>("set_theme", { theme }),
+  setLanguage: (language: string) => invoke<void>("set_language", { language }),
 
   connectionState: () => invoke<ConnectionPayload>("connection_state"),
   discoverDevices: (seconds?: number) =>
@@ -240,6 +287,35 @@ export const ipc = {
 
   deviceStatus: () => invoke<DeviceStatus>("device_status"),
   setDeviceClock: () => invoke<void>("set_device_clock"),
+  deviceConfigs: () => invoke<ConfigEntry[]>("device_configs"),
+  setDeviceConfig: (key: string, value: string) =>
+    invoke<void>("set_device_config", { key, value }),
+  copyScreenshot: () => invoke<void>("copy_screenshot_to_clipboard"),
+
+  wifiEnabled: () => invoke<boolean>("wifi_enabled"),
+  setWifiEnabled: (on: boolean) => invoke<void>("set_wifi_enabled", { on }),
+  wifiStoredNetworks: () => invoke<AccessPoint[]>("wifi_stored_networks"),
+  wifiScan: () => invoke<AccessPoint[]>("wifi_scan"),
+  wifiAddNetwork: (config: WifiNetworkConfig) =>
+    invoke<void>("wifi_add_network", { config }),
+  wifiRemoveNetwork: (ssid: string, security: string) =>
+    invoke<void>("wifi_remove_network", { ssid, security }),
+
+  listTemplates: () => invoke<NoteTemplate[]>("list_templates"),
+  uploadTemplates: (paths: string[]) => invoke<number[]>("upload_templates", { paths }),
+  deleteTemplate: (id: string) => invoke<void>("delete_template", { id }),
+
+  usbPorts: () => invoke<UsbCandidate[]>("usb_ports"),
+  usbSwitchMode: (port: string, mode?: "rndis" | "cdc-ecm") =>
+    invoke<string>("usb_switch_mode", { port, mode }),
+
+  importCandidates: () => invoke<ImportCandidate[]>("import_candidates"),
+  importCredentials: (deviceidPath: string, privatekeyPath: string, address: string) =>
+    invoke<ConnectionPayload>("import_credentials", {
+      deviceidPath,
+      privatekeyPath,
+      address,
+    }),
 
   uploadFiles: (destFolderId: string, items: UploadItem[]) =>
     invoke<number[]>("upload_files", { destFolderId, items }),

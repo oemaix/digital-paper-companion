@@ -14,6 +14,10 @@ pub struct Settings {
     pub version: u32,
     #[serde(default = "default_theme")]
     pub theme: String,
+    /// UI language: `"system"` or a locale code like `"en"`, `"de"`
+    /// (FR-APP-4, NFR-I18N-1).
+    #[serde(default = "default_language")]
+    pub language: String,
     #[serde(default)]
     pub last_active_serial: Option<String>,
 }
@@ -24,12 +28,16 @@ fn default_version() -> u32 {
 fn default_theme() -> String {
     "system".into()
 }
+fn default_language() -> String {
+    "system".into()
+}
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             version: 1,
             theme: default_theme(),
+            language: default_language(),
             last_active_serial: None,
         }
     }

@@ -15,6 +15,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 chacha20poly1305 = "0.10"
+# Screenshot → clipboard (FR-SET-5): decode the device PNG, write as image.
+image = { version = "0.25", default-features = false, features = ["png"] }
+tauri-plugin-clipboard-manager = "2"
 chrono = { version = "0.4.45", features = ["serde"] }
 dpt-core.workspace = true
 futures-util = "0.3.34"
@@ -29,3 +32,6 @@ tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.26.0", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

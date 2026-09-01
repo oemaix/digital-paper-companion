@@ -20,6 +20,7 @@ use crate::transfers::TransferState;
 pub mod events {
     pub const CONNECTION_CHANGED: &str = "connection:changed";
     pub const ENTRIES_INVALIDATED: &str = "entries:invalidated";
+    pub const TEMPLATES_INVALIDATED: &str = "templates:invalidated";
     pub const TRANSFER_UPDATED: &str = "transfer:updated";
     pub const SYNC_UPDATED: &str = "sync:updated";
     pub const SYNC_CONFIRMATION_REQUIRED: &str = "sync:confirmation-required";

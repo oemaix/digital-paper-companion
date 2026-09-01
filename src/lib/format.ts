@@ -1,4 +1,5 @@
 /** Formatting helpers (docs/05 §5.1: tabular numerals, locale dates). */
+import { currentLocale } from "./i18n";
 
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "—";
@@ -19,11 +20,19 @@ export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString(currentLocale(), {
     year: "numeric",
     month: "short",
     day: "numeric",
   });
+}
+
+/** Month heading for the notes view, e.g. "December 2017" (docs/05 §3.3). */
+export function formatMonth(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString(currentLocale(), { year: "numeric", month: "long" });
 }
 
 /** Basename without the `.pdf` extension for display. */

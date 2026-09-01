@@ -69,8 +69,19 @@ impl DeviceClient {
 
     /// Captures the current screen as PNG bytes (protocol §7.9; FR-SET-5).
     pub async fn screenshot_png(&self) -> Result<Vec<u8>, Error> {
+        self.screenshot_raw("/system/controls/screen_shot").await
+    }
+
+    /// Captures the current screen as JPEG bytes (protocol §7.9; FR-SET-5).
+    pub async fn screenshot_jpeg(&self) -> Result<Vec<u8>, Error> {
+        self.screenshot_raw("/system/controls/screen_shot2?query=jpeg")
+            .await
+    }
+
+    async fn screenshot_raw(&self, path: &str) -> Result<Vec<u8>, Error> {
+        let p = path.to_string();
         let resp = self
-            .send(|http, base| http.get(format!("{base}/system/controls/screen_shot")))
+            .send(move |http, base| http.get(format!("{base}{p}")))
             .await?;
         if !resp.status().is_success() {
             return Err(Error::Api {

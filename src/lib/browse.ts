@@ -8,6 +8,7 @@ import { create } from "zustand";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { ipc, errorMessage, type Entry, type UploadItem } from "./ipc";
 import { useApp } from "./store";
+import { t } from "./i18n";
 
 export type SortKey = "name" | "modified" | "size";
 export type ViewMode = "list" | "grid";
@@ -127,11 +128,11 @@ export const useBrowse = create<BrowseStore>((set, get) => ({
   uploadPaths: async (paths) => {
     const app = useApp.getState();
     if (app.connection.state !== "connected") {
-      app.toast("Connect a device before uploading", "error");
+      app.toast(t("browse.connectFirst"), "error");
       return;
     }
     const { path } = get();
-    set({ busy: "Preparing upload…" });
+    set({ busy: t("browse.preparingUpload") });
     try {
       const classified = await ipc.classifyPaths(paths);
       const destFolderId = await folderIdForPath(path);
@@ -142,7 +143,7 @@ export const useBrowse = create<BrowseStore>((set, get) => ({
       );
       const skipped = classified.length - dirs.length - pdfs.length;
       if (skipped > 0) {
-        app.toast(`${skipped} non-PDF file${skipped > 1 ? "s" : ""} skipped`);
+        app.toast(t("browse.skippedNonPdf", { n: skipped }));
       }
 
       for (const dir of dirs) {
@@ -236,7 +237,7 @@ export const useBrowse = create<BrowseStore>((set, get) => ({
   /** Asks for a target directory and enqueues downloads (FR-TRF-2/5). */
   downloadEntries: async (ids) => {
     if (ids.length === 0) return;
-    const dir = await openFileDialog({ directory: true, title: "Download to…" });
+    const dir = await openFileDialog({ directory: true, title: t("browse.downloadTo") });
     if (!dir || Array.isArray(dir)) return;
     try {
       await ipc.downloadEntries(ids, dir);

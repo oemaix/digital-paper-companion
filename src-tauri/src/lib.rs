@@ -7,6 +7,7 @@
 mod commands;
 mod credentials;
 mod error;
+mod import;
 mod scheduler;
 mod state;
 mod stores;
@@ -29,6 +30,7 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -59,6 +61,7 @@ pub fn run() {
             commands::app_version,
             commands::get_settings,
             commands::set_theme,
+            commands::set_language,
             commands::connection_state,
             commands::discover_devices,
             commands::probe_device,
@@ -79,6 +82,22 @@ pub fn run() {
             commands::open_on_device,
             commands::device_status,
             commands::set_device_clock,
+            commands::device_configs,
+            commands::set_device_config,
+            commands::copy_screenshot_to_clipboard,
+            commands::wifi_enabled,
+            commands::set_wifi_enabled,
+            commands::wifi_stored_networks,
+            commands::wifi_scan,
+            commands::wifi_add_network,
+            commands::wifi_remove_network,
+            commands::list_templates,
+            commands::upload_templates,
+            commands::delete_template,
+            commands::usb_ports,
+            commands::usb_switch_mode,
+            commands::import_candidates,
+            commands::import_credentials,
             commands::upload_files,
             commands::upload_folder,
             commands::download_entries,

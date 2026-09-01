@@ -13,6 +13,8 @@ import {
   type SyncRunRecord,
   type ExcludedSyncAction,
 } from "../lib/ipc";
+import { t as tt, useT } from "../lib/i18n";
+import { currentLocale } from "../lib/i18n";
 
 /**
  * Sync tab of the settings dialog (docs/05 §3.6; FR-SYN-1…8): the pair
@@ -20,11 +22,16 @@ import {
  * dialog and the run history.
  */
 
-const MODE_LABEL: Record<SyncMode, string> = {
-  "two-way": "Two-way",
-  "mirror-to-local": "Mirror to computer",
-  "mirror-to-remote": "Mirror to device",
-};
+function modeLabel(mode: SyncMode): string {
+  switch (mode) {
+    case "two-way":
+      return tt("sync.modeTwoWay");
+    case "mirror-to-local":
+      return tt("sync.modeMirrorLocal");
+    case "mirror-to-remote":
+      return tt("sync.modeMirrorRemote");
+  }
+}
 
 function emptyPair(): SyncPair {
   return {
@@ -43,24 +50,35 @@ function emptyPair(): SyncPair {
 
 function scheduleSummary(pair: SyncPair): string {
   const parts: string[] = [];
-  if (pair.on_connect) parts.push("on connect");
-  if (pair.interval_minutes) parts.push(`every ${pair.interval_minutes} min`);
-  return parts.length > 0 ? parts.join(" · ") : "manual only";
+  if (pair.on_connect) parts.push(tt("sync.onConnect"));
+  if (pair.interval_minutes) {
+    parts.push(tt("sync.everyN", { n: pair.interval_minutes }));
+  }
+  return parts.length > 0 ? parts.join(" · ") : tt("sync.manualOnly");
 }
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? iso : d.toLocaleString();
+  return isNaN(d.getTime()) ? iso : d.toLocaleString(currentLocale());
 }
 
-const RESULT_LABEL: Record<string, string> = {
-  ok: "OK",
-  partial: "Partial",
-  cancelled: "Cancelled",
-  failed: "Failed",
-};
+function resultLabel(result: string): string {
+  switch (result) {
+    case "ok":
+      return tt("sync.resultOk");
+    case "partial":
+      return tt("sync.resultPartial");
+    case "cancelled":
+      return tt("sync.resultCancelled");
+    case "failed":
+      return tt("sync.resultFailed");
+    default:
+      return result;
+  }
+}
 
 export default function SyncSettings() {
+  const t = useT();
   const app = useApp();
   const pairs = app.syncPairs ?? [];
   const connected = app.connection.state === "connected";
@@ -71,7 +89,7 @@ export default function SyncSettings() {
 
   const runNow = (id: string) => {
     void ipc.syncRun(id).then(
-      () => app.toast("Sync queued"),
+      () => app.toast(t("sync.queuedToast")),
       (err) => app.toast(errorMessage(err), "error"),
     );
   };
@@ -90,9 +108,7 @@ export default function SyncSettings() {
 
   const deletePair = async (pair: SyncPairInfo) => {
     if (
-      !window.confirm(
-        `Remove sync pair “${pair.name || pair.local_root}”? Local files are not touched.`,
-      )
+      !window.confirm(t("sync.removeConfirm", { name: pair.name || pair.local_root }))
     ) {
       return;
     }
@@ -119,12 +135,7 @@ export default function SyncSettings() {
 
   return (
     <div className="flex flex-col gap-3">
-      {pairs.length === 0 && (
-        <p className="text-text-secondary">
-          A sync pair keeps a local folder and a device folder in step — two-way or as a
-          mirror. Runs can be scheduled on connect or on an interval.
-        </p>
-      )}
+      {pairs.length === 0 && <p className="text-text-secondary">{t("sync.intro")}</p>}
 
       {pairs.map((pair) => {
         const running = app.syncStatus.running?.pair_id === pair.id;
@@ -139,22 +150,25 @@ export default function SyncSettings() {
                   </span>
                   {!pair.enabled && (
                     <span className="border border-border px-1 text-[11px] text-text-secondary">
-                      disabled
+                      {t("sync.disabledBadge")}
                     </span>
                   )}
                 </div>
                 <div className="mt-0.5 truncate text-xs text-text-secondary">
-                  {pair.local_root} ⇄ {pair.remote_root} · {MODE_LABEL[pair.mode]} ·{" "}
+                  {pair.local_root} ⇄ {pair.remote_root} · {modeLabel(pair.mode)} ·{" "}
                   {scheduleSummary(pair)}
                 </div>
                 <div className="mt-0.5 text-xs text-text-secondary">
                   {running
-                    ? "Running…"
+                    ? t("sync.running")
                     : queued
-                      ? "Queued"
+                      ? t("sync.queuedState")
                       : pair.last_run
-                        ? `Last run ${RESULT_LABEL[pair.last_run.result] ?? pair.last_run.result} · ${formatTime(pair.last_run.finished_at)}`
-                        : "Never synced"}
+                        ? t("sync.lastRun", {
+                            result: resultLabel(pair.last_run.result),
+                            time: formatTime(pair.last_run.finished_at),
+                          })
+                        : t("sync.neverSynced")}
                 </div>
               </div>
             </div>
@@ -164,7 +178,7 @@ export default function SyncSettings() {
                   onClick={() => void ipc.syncCancel(pair.id)}
                   className="border border-border px-2 py-1 hover:border-text"
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
               ) : (
                 <>
@@ -173,14 +187,14 @@ export default function SyncSettings() {
                     disabled={!connected}
                     className="border border-border px-2 py-1 hover:border-text disabled:opacity-40"
                   >
-                    Sync now
+                    {t("sync.syncNow")}
                   </button>
                   <button
                     onClick={() => void openPreview(pair.id)}
                     disabled={!connected || previewLoading === pair.id}
                     className="border border-border px-2 py-1 hover:border-text disabled:opacity-40"
                   >
-                    {previewLoading === pair.id ? "Planning…" : "Preview"}
+                    {previewLoading === pair.id ? t("sync.planning") : t("sync.preview")}
                   </button>
                 </>
               )}
@@ -188,19 +202,19 @@ export default function SyncSettings() {
                 onClick={() => setEditing({ ...pair })}
                 className="border border-border px-2 py-1 hover:border-text"
               >
-                Edit
+                {t("common.edit")}
               </button>
               <button
                 onClick={() => setHistoryFor(historyFor === pair.id ? null : pair.id)}
                 className="border border-border px-2 py-1 hover:border-text"
               >
-                History
+                {t("sync.history")}
               </button>
               <button
                 onClick={() => void deletePair(pair)}
                 className="ml-auto border border-transparent px-2 py-1 text-text-secondary hover:border-border hover:text-text"
               >
-                Remove
+                {t("common.remove")}
               </button>
             </div>
             {historyFor === pair.id && <History pairId={pair.id} />}
@@ -212,7 +226,7 @@ export default function SyncSettings() {
         onClick={() => setEditing(emptyPair())}
         className="self-start border border-border px-3 py-1.5 hover:border-text"
       >
-        Add sync pair
+        {t("sync.addPair")}
       </button>
 
       {preview && (
@@ -222,7 +236,7 @@ export default function SyncSettings() {
           onClose={() => setPreview(null)}
           onApplied={() => {
             setPreview(null);
-            app.toast("Sync queued");
+            app.toast(t("sync.queuedToast"));
           }}
         />
       )}
@@ -241,6 +255,7 @@ function PairEditor({
   onDone: () => Promise<void>;
   onCancel: () => void;
 }) {
+  const t = useT();
   const toast = useApp((s) => s.toast);
   const [pair, setPair] = useState<SyncPair>(initial);
   const [filtersText, setFiltersText] = useState(initial.filters.join("\n"));
@@ -278,35 +293,36 @@ function PairEditor({
   return (
     <div className="flex flex-col gap-3 text-[13px]">
       <label className="flex flex-col gap-1">
-        <span className="text-text-secondary">Name (optional)</span>
+        <span className="text-text-secondary">{t("sync.editorName")}</span>
         <input
           value={pair.name}
           onChange={(e) => setPair({ ...pair, name: e.target.value })}
-          placeholder="e.g. Papers"
+          placeholder={t("sync.editorNamePlaceholder")}
           className={field}
         />
       </label>
 
       <div className="flex flex-col gap-1">
-        <span className="text-text-secondary">Local folder</span>
+        <span className="text-text-secondary">{t("sync.editorLocalFolder")}</span>
         <div className="flex gap-1.5">
           <input
             value={pair.local_root}
             onChange={(e) => setPair({ ...pair, local_root: e.target.value })}
             placeholder="/home/…/DigitalPaper"
+            aria-label={t("sync.editorLocalFolder")}
             className={`${field} min-w-0 flex-1`}
           />
           <button
             onClick={() => void pickFolder()}
             className="border border-border px-2 hover:border-text"
           >
-            Choose…
+            {t("sync.editorChoose")}
           </button>
         </div>
       </div>
 
       <label className="flex flex-col gap-1">
-        <span className="text-text-secondary">Device folder</span>
+        <span className="text-text-secondary">{t("sync.editorDeviceFolder")}</span>
         <input
           value={pair.remote_root}
           onChange={(e) => setPair({ ...pair, remote_root: e.target.value })}
@@ -316,31 +332,27 @@ function PairEditor({
       </label>
 
       <label className="flex flex-col gap-1">
-        <span className="text-text-secondary">Mode</span>
+        <span className="text-text-secondary">{t("sync.editorMode")}</span>
         <select
           value={pair.mode}
           onChange={(e) => setPair({ ...pair, mode: e.target.value as SyncMode })}
           className={field}
         >
-          <option value="two-way">Two-way — changes flow in both directions</option>
-          <option value="mirror-to-local">
-            Mirror to computer — the device is the source of truth
-          </option>
-          <option value="mirror-to-remote">
-            Mirror to device — this computer is the source of truth
-          </option>
+          <option value="two-way">{t("sync.editorModeTwoWay")}</option>
+          <option value="mirror-to-local">{t("sync.editorModeMirrorLocal")}</option>
+          <option value="mirror-to-remote">{t("sync.editorModeMirrorRemote")}</option>
         </select>
       </label>
 
       <fieldset className="flex flex-col gap-1.5">
-        <span className="text-text-secondary">Schedule</span>
+        <span className="text-text-secondary">{t("sync.editorSchedule")}</span>
         <label className="flex items-center gap-2">
           <input
             type="checkbox"
             checked={pair.on_connect}
             onChange={(e) => setPair({ ...pair, on_connect: e.target.checked })}
           />
-          Run when the device connects
+          {t("sync.editorOnConnect")}
         </label>
         <label className="flex items-center gap-2">
           <input
@@ -350,7 +362,7 @@ function PairEditor({
               setPair({ ...pair, interval_minutes: e.target.checked ? 30 : null })
             }
           />
-          Run every
+          {t("sync.editorEveryPre")}
           <input
             type="number"
             min={1}
@@ -365,14 +377,12 @@ function PairEditor({
             }
             className={`${field} w-16 disabled:opacity-40`}
           />
-          minutes while connected
+          {t("sync.editorEveryPost")}
         </label>
       </fieldset>
 
       <label className="flex flex-col gap-1">
-        <span className="text-text-secondary">
-          Exclude patterns (one per line, e.g. <code>Note</code> or <code>Drafts/*</code>)
-        </span>
+        <span className="text-text-secondary">{t("sync.editorFilters")}</span>
         <textarea
           value={filtersText}
           onChange={(e) => setFiltersText(e.target.value)}
@@ -383,7 +393,7 @@ function PairEditor({
 
       <label className="flex items-center justify-between gap-4">
         <span>
-          Ask before deleting more than
+          {t("sync.editorThresholdPre")}
           <input
             type="number"
             min={0}
@@ -396,7 +406,7 @@ function PairEditor({
             }
             className={`${field} mx-1.5 w-16`}
           />
-          files
+          {t("sync.editorThresholdPost")}
         </span>
       </label>
 
@@ -406,7 +416,7 @@ function PairEditor({
           checked={pair.enabled}
           onChange={(e) => setPair({ ...pair, enabled: e.target.checked })}
         />
-        Enabled
+        {t("sync.editorEnabled")}
       </label>
 
       <div className="flex gap-2 border-t border-border pt-3">
@@ -415,13 +425,13 @@ function PairEditor({
           disabled={saving || !pair.local_root.trim()}
           className="border border-accent bg-accent px-3 py-1.5 text-accent-foreground disabled:opacity-50"
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? t("common.saving") : t("common.save")}
         </button>
         <button
           onClick={onCancel}
           className="border border-border px-3 py-1.5 hover:border-text"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
       </div>
     </div>
@@ -431,6 +441,7 @@ function PairEditor({
 // ---- run history (FR-SYN-7) ------------------------------------------------------
 
 function History({ pairId }: { pairId: string }) {
+  const t = useT();
   const [records, setRecords] = useState<SyncRunRecord[] | null>(null);
 
   useEffect(() => {
@@ -439,13 +450,15 @@ function History({ pairId }: { pairId: string }) {
 
   if (records === null) {
     return (
-      <p className="border-t border-border p-2.5 text-xs text-text-secondary">Loading…</p>
+      <p className="border-t border-border p-2.5 text-xs text-text-secondary">
+        {t("sync.historyLoading")}
+      </p>
     );
   }
   if (records.length === 0) {
     return (
       <p className="border-t border-border p-2.5 text-xs text-text-secondary">
-        No runs yet.
+        {t("sync.historyEmpty")}
       </p>
     );
   }
@@ -454,17 +467,18 @@ function History({ pairId }: { pairId: string }) {
       {records.map((r, i) => (
         <li key={i} className="border-b border-border p-2 last:border-b-0">
           <div className="flex justify-between gap-2">
-            <span className="font-medium">{RESULT_LABEL[r.result] ?? r.result}</span>
+            <span className="font-medium">{resultLabel(r.result)}</span>
             <span className="text-text-secondary">
               {formatTime(r.finished_at)} · {r.trigger}
               {r.device_serial ? ` · ${r.device_serial}` : ""}
             </span>
           </div>
           <div className="text-text-secondary">
-            {r.done} done{r.failed > 0 ? `, ${r.failed} failed` : ""}
-            {r.skipped > 0 ? `, ${r.skipped} skipped` : ""}
+            {t("sync.historyDone", { n: r.done })}
+            {r.failed > 0 ? t("sync.historyFailed", { n: r.failed }) : ""}
+            {r.skipped > 0 ? t("sync.historySkipped", { n: r.skipped }) : ""}
             {r.conflicts.length > 0
-              ? ` · ${r.conflicts.length} conflict cop${r.conflicts.length === 1 ? "y" : "ies"}`
+              ? t("sync.historyConflicts", { n: r.conflicts.length })
               : ""}
           </div>
           {r.errors.slice(0, 3).map((e, j) => (
@@ -505,6 +519,7 @@ export function PreviewDialog({
   onClose: () => void;
   onApplied: () => void;
 }) {
+  const t = useT();
   const toast = useApp((s) => s.toast);
   const [deselected, setDeselected] = useState<Set<string>>(new Set());
 
@@ -556,7 +571,7 @@ export function PreviewDialog({
       </h3>
       <ul className="max-h-64 overflow-auto border border-border">
         {actions.length === 0 && (
-          <li className="p-1.5 text-xs text-text-secondary">None</li>
+          <li className="p-1.5 text-xs text-text-secondary">{t("common.none")}</li>
         )}
         {actions.map((a) => (
           <li key={actionKey(a)} className="border-b border-border last:border-b-0">
@@ -581,9 +596,9 @@ export function PreviewDialog({
   );
 
   return (
-    <Dialog title="Sync preview" onClose={onClose} wide>
+    <Dialog title={t("syncPreview.title")} onClose={onClose} wide>
       {nothing ? (
-        <p className="text-text-secondary">Everything is in sync — nothing to do.</p>
+        <p className="text-text-secondary">{t("syncPreview.nothing")}</p>
       ) : (
         <div className="flex flex-col gap-3 text-[13px]">
           {plan.warnings.length > 0 && (
@@ -594,18 +609,19 @@ export function PreviewDialog({
             </div>
           )}
           <div className="flex gap-3">
-            {column("Uploads", [...groups.uploads, ...[]])}
-            {column("Downloads", groups.downloads)}
-            {column("Deletions", groups.deletions, (a) =>
-              a.kind.startsWith("delete_local") ? "on this computer" : "on the device",
+            {column(t("syncPreview.uploads"), [...groups.uploads])}
+            {column(t("syncPreview.downloads"), groups.downloads)}
+            {column(t("syncPreview.deletions"), groups.deletions, (a) =>
+              a.kind.startsWith("delete_local")
+                ? t("syncPreview.onComputer")
+                : t("syncPreview.onDevice"),
             )}
           </div>
           {groups.conflicts.length > 0 &&
-            column(
-              "Conflicts (newer side wins, loser kept as a copy)",
-              groups.conflicts,
-              (a) =>
-                a.winner === "remote" ? "device version wins" : "computer version wins",
+            column(t("syncPreview.conflicts"), groups.conflicts, (a) =>
+              a.winner === "remote"
+                ? t("syncPreview.deviceWins")
+                : t("syncPreview.computerWins"),
             )}
         </div>
       )}
@@ -615,14 +631,14 @@ export function PreviewDialog({
             onClick={() => void apply()}
             className="border border-accent bg-accent px-3 py-1.5 text-accent-foreground"
           >
-            Apply
+            {t("common.apply")}
           </button>
         )}
         <button
           onClick={onClose}
           className="border border-border px-3 py-1.5 hover:border-text"
         >
-          {nothing ? "Close" : "Cancel"}
+          {nothing ? t("common.close") : t("common.cancel")}
         </button>
       </div>
     </Dialog>

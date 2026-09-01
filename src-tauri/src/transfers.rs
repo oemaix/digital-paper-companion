@@ -44,6 +44,13 @@ pub enum JobKind {
         entry_id: String,
         target_path: PathBuf,
     },
+    /// Note-template upload (FR-TRF-6): create-then-stream like documents,
+    /// shown in the same queue (docs/05 §3.4).
+    UploadTemplate {
+        local_path: PathBuf,
+        template_name: String,
+        file_name: String,
+    },
 }
 
 /// Frontend-visible snapshot of one job.
@@ -89,6 +96,7 @@ pub async fn enqueue(state: &Arc<AppState>, kinds: Vec<(String, JobKind)>) -> Ve
             let kind_label = match kind {
                 JobKind::Upload { .. } => "upload",
                 JobKind::Download { .. } => "download",
+                JobKind::UploadTemplate { .. } => "upload-template",
             };
             ts.jobs.push(TransferJob {
                 snapshot: JobSnapshot {
@@ -179,6 +187,7 @@ async fn worker_loop(state: Arc<AppState>) {
         emit_snapshot(&state).await;
 
         let uploaded = matches!(kind, JobKind::Upload { .. });
+        let template = matches!(kind, JobKind::UploadTemplate { .. });
         let result = run_job(&state, id, kind, &cancel).await;
 
         {
@@ -204,6 +213,10 @@ async fn worker_loop(state: Arc<AppState>) {
         if uploaded {
             // Remote tree changed; browsing views must refetch (FR-BRW-1).
             state.invalidate_entries().await;
+        }
+        if template {
+            // Template list changed; the templates view refetches (FR-BRW-7).
+            let _ = state.app.emit(events::TEMPLATES_INVALIDATED, ());
         }
     }
 }
@@ -271,6 +284,16 @@ async fn run_job(
             file.flush().await?;
             drop(file);
             tokio::fs::rename(&tmp, &target_path).await?;
+            Ok(())
+        }
+        JobKind::UploadTemplate {
+            local_path,
+            template_name,
+            file_name,
+        } => {
+            client
+                .upload_template(&template_name, &file_name, &local_path)
+                .await?;
             Ok(())
         }
     }

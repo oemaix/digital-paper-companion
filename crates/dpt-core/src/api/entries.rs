@@ -2,10 +2,6 @@
 
 use std::path::Path;
 
-use reqwest::multipart::{Form, Part};
-use reqwest::Body;
-use tokio_util::io::ReaderStream;
-
 use crate::client::DeviceClient;
 use crate::model::{Entry, EntryListResponse};
 use crate::Error;
@@ -134,45 +130,12 @@ impl DeviceClient {
         file_name: &str,
         local_path: &Path,
     ) -> Result<(), Error> {
-        // The device's embedded HTTP server rejects chunked uploads, so we
-        // must send a Content-Length. Providing the part length lets reqwest
-        // compute the full multipart length and emit Content-Length instead
-        // of Transfer-Encoding: chunked.
-        let len = tokio::fs::metadata(local_path).await?.len();
-        let file = tokio::fs::File::open(local_path).await?;
-        let stream = ReaderStream::new(file);
-        let part = Part::stream_with_length(Body::wrap_stream(stream), len)
-            .file_name(form_encode(file_name))
-            .mime_str("application/octet-stream")
-            .map_err(|e| Error::Protocol(e.to_string()))?;
-        let form = Form::new().part("file", part);
-
-        let cookie = self.cookie_header().await?;
-        let resp = self
-            .http()
-            .put(format!(
-                "{}/documents/{}/file",
-                self.api_base(),
-                document_id
-            ))
-            .header(reqwest::header::COOKIE, cookie)
-            .multipart(form)
-            .send()
-            .await?;
-        if resp.status().is_success() {
-            Ok(())
-        } else {
-            let status = resp.status().as_u16();
-            let text = resp.text().await.unwrap_or_default();
-            Err(Error::Api {
-                status,
-                message: if text.is_empty() {
-                    "upload failed".into()
-                } else {
-                    text
-                },
-            })
-        }
+        self.put_file_multipart(
+            &format!("/documents/{document_id}/file"),
+            file_name,
+            local_path,
+        )
+        .await
     }
 
     /// Full upload: create the entry then stream the content, deleting the

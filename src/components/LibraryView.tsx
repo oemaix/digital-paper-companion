@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Dialog from "./Dialog";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
-import { FileIcon, FolderIcon, UploadIcon } from "./icons";
+import { DownloadIcon, FileIcon, FolderIcon, UploadIcon } from "./icons";
 import { useApp } from "../lib/store";
 import {
   useBrowse,
@@ -12,14 +12,26 @@ import {
   type SortKey,
 } from "../lib/browse";
 import { ipc, errorMessage, type Entry } from "../lib/ipc";
-import { formatBytes, formatDate } from "../lib/format";
+import { formatBytes, formatDate, formatMonth } from "../lib/format";
+import { useT } from "../lib/i18n";
+
+/** Rows grouped under an optional heading (months in the notes view). */
+interface RowGroup {
+  label: string | null;
+  rows: Entry[];
+}
 
 /**
- * The library/notes browser (docs/05 §4.2–4.3; FR-BRW-1/2/3/5/6):
+ * The library/notes browser (docs/05 §3.2–3.3; FR-BRW-1/2/3/4/5/6):
  * folder navigation, list/grid modes, search across the subtree, sortable
  * columns, multi-select, context actions and OS drag-&-drop upload.
+ *
+ * With `notes` set, the view flattens the note subtree, sorts by last
+ * modified and groups by month, with a "download all new notes" action
+ * (docs/05 §3.3; FR-BRW-4).
  */
-export default function LibraryView() {
+export default function LibraryView({ notes = false }: { notes?: boolean }) {
+  const t = useT();
   const entries = useApp((s) => s.entries);
   const entriesLoading = useApp((s) => s.entriesLoading);
   const toast = useApp((s) => s.toast);
@@ -47,11 +59,20 @@ export default function LibraryView() {
   }, []);
 
   // ---- derive visible rows ---------------------------------------------------
+  const search = browse.search.trim().toLowerCase();
+
   const visible = useMemo(() => {
     if (!entries) return [];
-    const pool = browse.search.trim()
+    if (notes) {
+      // Notes: the whole subtree flattened to documents, newest first.
+      return subtreeOf(entries, browse.root)
+        .filter((e) => e.entry_type === "document")
+        .filter((e) => !search || e.entry_name.toLowerCase().includes(search))
+        .sort((a, b) => (b.modified_date ?? "").localeCompare(a.modified_date ?? ""));
+    }
+    const pool = search
       ? subtreeOf(entries, browse.root).filter((e) =>
-          e.entry_name.toLowerCase().includes(browse.search.trim().toLowerCase()),
+          e.entry_name.toLowerCase().includes(search),
         )
       : childrenOf(entries, browse.path);
     const dir = browse.sortAsc ? 1 : -1;
@@ -71,7 +92,25 @@ export default function LibraryView() {
           );
       }
     });
-  }, [entries, browse.root, browse.path, browse.search, browse.sortKey, browse.sortAsc]);
+  }, [entries, notes, browse.root, browse.path, search, browse.sortKey, browse.sortAsc]);
+
+  // Month grouping for the notes view (docs/05 §3.3).
+  const groups = useMemo<RowGroup[]>(() => {
+    if (!notes) return [{ label: null, rows: visible }];
+    const out: RowGroup[] = [];
+    for (const entry of visible) {
+      const label = formatMonth(entry.modified_date);
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.rows.push(entry);
+      else out.push({ label, rows: [entry] });
+    }
+    return out;
+  }, [notes, visible]);
+
+  const newNotes = useMemo(
+    () => (notes ? visible.filter((e) => e.is_new).map((e) => e.entry_id) : []),
+    [notes, visible],
+  );
 
   // ---- selection ---------------------------------------------------------------
   const onRowClick = (e: React.MouseEvent, entry: Entry) => {
@@ -100,11 +139,11 @@ export default function LibraryView() {
       if (entry.entry_type === "folder") {
         browse.navigate(entry.entry_path);
       } else {
-        toast(`Opening "${entry.entry_name}"…`);
+        toast(t("library.opening", { name: entry.entry_name }));
         ipc.openEntry(entry.entry_id).catch((err) => toast(errorMessage(err), "error"));
       }
     },
-    [browse, toast],
+    [browse, toast, t],
   );
 
   const onContextMenu = (e: React.MouseEvent, entry: Entry) => {
@@ -122,12 +161,13 @@ export default function LibraryView() {
     const single = ids.length === 1;
     return [
       {
-        label: entry.entry_type === "folder" ? "Open" : "Open in PDF viewer",
+        label:
+          entry.entry_type === "folder" ? t("library.open") : t("library.openInViewer"),
         disabled: !single,
         onClick: () => openEntry(entry),
       },
       {
-        label: "Open on device",
+        label: t("library.openOnDevice"),
         disabled: !single || entry.entry_type === "folder",
         onClick: () =>
           void ipc
@@ -136,17 +176,23 @@ export default function LibraryView() {
       },
       { label: "", separator: true },
       {
-        label: ids.length > 1 ? `Download ${ids.length} items…` : "Download…",
+        label:
+          ids.length > 1
+            ? t("library.downloadN", { n: ids.length })
+            : t("library.download"),
         onClick: () => void browse.downloadEntries(ids),
       },
       {
-        label: "Rename…",
+        label: t("library.renameAction"),
         disabled: !single || entry.entry_type === "folder",
         onClick: () => browse.setRenameTarget(entry),
       },
       { label: "", separator: true },
       {
-        label: ids.length > 1 ? `Delete ${ids.length} items…` : "Delete…",
+        label:
+          ids.length > 1
+            ? t("library.deleteN", { n: ids.length })
+            : t("library.deleteAction"),
         onClick: () => browse.setDeleteIds(ids),
       },
     ];
@@ -156,7 +202,7 @@ export default function LibraryView() {
   if (!entries) {
     return (
       <div className="flex flex-1 items-center justify-center text-text-secondary">
-        {entriesLoading ? "Loading library…" : "Library not loaded."}
+        {entriesLoading ? t("library.loading") : t("library.notLoaded")}
       </div>
     );
   }
@@ -168,10 +214,28 @@ export default function LibraryView() {
         if (e.target === e.currentTarget) browse.setSelection([]);
       }}
     >
+      {notes && (
+        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+          <button
+            disabled={newNotes.length === 0}
+            onClick={() => void browse.downloadEntries(newNotes)}
+            className="flex items-center gap-1.5 border border-border px-2.5 py-1 text-[13px] hover:border-text disabled:opacity-40 disabled:hover:border-border"
+          >
+            <DownloadIcon width={14} height={14} />
+            {newNotes.length === 0
+              ? t("notes.noNewNotes")
+              : newNotes.length === 1
+                ? t("notes.downloadOneNew")
+                : t("notes.downloadAllNew", { n: newNotes.length })}
+          </button>
+        </div>
+      )}
+
       {browse.viewMode === "list" ? (
         <ListMode
-          rows={visible}
-          showPath={browse.search.trim() !== ""}
+          groups={groups}
+          sortable={!notes}
+          showPath={notes || search !== ""}
           selection={browse.selection}
           sortKey={browse.sortKey}
           sortAsc={browse.sortAsc}
@@ -192,9 +256,7 @@ export default function LibraryView() {
 
       {visible.length === 0 && (
         <div className="flex flex-1 items-center justify-center p-8 text-center text-text-secondary">
-          {browse.search.trim()
-            ? "No entries match the search."
-            : "This folder is empty. Drag PDF files here to upload them."}
+          {search ? t("library.noSearchResults") : t("library.emptyFolder")}
         </div>
       )}
 
@@ -202,7 +264,9 @@ export default function LibraryView() {
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-text bg-bg/80">
           <div className="flex items-center gap-2 text-[15px] font-medium">
             <UploadIcon width={20} height={20} />
-            Drop to upload into “{browse.path.split("/").pop()}”
+            {t("library.dropToUpload", {
+              folder: browse.path.split("/").pop() ?? browse.path,
+            })}
           </div>
         </div>
       )}
@@ -239,7 +303,8 @@ export default function LibraryView() {
 // ---- list mode -------------------------------------------------------------
 
 function ListMode({
-  rows,
+  groups,
+  sortable,
   showPath,
   selection,
   sortKey,
@@ -249,7 +314,8 @@ function ListMode({
   onOpen,
   onContextMenu,
 }: {
-  rows: Entry[];
+  groups: RowGroup[];
+  sortable: boolean;
   showPath: boolean;
   selection: string[];
   sortKey: SortKey;
@@ -259,72 +325,91 @@ function ListMode({
   onOpen: (entry: Entry) => void;
   onContextMenu: (e: React.MouseEvent, entry: Entry) => void;
 }) {
-  const header = (key: SortKey, label: string, extra = "") => (
-    <button
-      onClick={() => onSort(key)}
-      className={`flex items-center gap-1 px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hover:text-text ${extra}`}
-    >
-      {label}
-      {sortKey === key && <span aria-hidden>{sortAsc ? "▲" : "▼"}</span>}
-    </button>
-  );
+  const t = useT();
+  const header = (key: SortKey, label: string, extra = "") =>
+    sortable ? (
+      <button
+        onClick={() => onSort(key)}
+        className={`flex items-center gap-1 px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hover:text-text ${extra}`}
+      >
+        {label}
+        {sortKey === key && <span aria-hidden>{sortAsc ? "▲" : "▼"}</span>}
+      </button>
+    ) : (
+      <span
+        className={`px-2 py-1 text-xs font-semibold uppercase tracking-wide text-text-secondary ${extra}`}
+      >
+        {label}
+      </span>
+    );
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="sticky top-0 z-10 grid grid-cols-[1fr_7rem_6rem_5rem] border-b border-border bg-surface">
-        {header("name", "Name")}
-        {header("modified", "Modified")}
-        {header("size", "Size", "justify-end")}
+        {header("name", t("library.colName"))}
+        {header("modified", t("library.colModified"))}
+        {header("size", t("library.colSize"), "justify-end")}
         <span className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-          Pages
+          {t("library.colPages")}
         </span>
       </div>
-      <ul role="listbox" aria-multiselectable>
-        {rows.map((entry) => {
-          const selected = selection.includes(entry.entry_id);
-          return (
-            <li
-              key={entry.entry_id}
-              role="option"
-              aria-selected={selected}
-              onClick={(e) => onRowClick(e, entry)}
-              onDoubleClick={() => onOpen(entry)}
-              onContextMenu={(e) => onContextMenu(e, entry)}
-              className={`grid h-9 cursor-default grid-cols-[1fr_7rem_6rem_5rem] items-center border-b border-border text-[13px] ${
-                selected ? "bg-accent text-accent-foreground" : "hover:bg-surface"
-              }`}
-            >
-              <span className="flex min-w-0 items-center gap-2 px-2">
-                {entry.entry_type === "folder" ? (
-                  <FolderIcon className="shrink-0" />
-                ) : (
-                  <FileIcon className="shrink-0" />
-                )}
-                <span className="min-w-0">
-                  <span className="block truncate" title={entry.entry_name}>
-                    {entry.entry_name}
-                    {entry.is_new ? " •" : ""}
-                  </span>
-                  {showPath && (
-                    <span
-                      className={`block truncate text-xs ${selected ? "" : "text-text-secondary"}`}
-                    >
-                      {entry.entry_path}
+      {groups.map((group, gi) => (
+        <div key={group.label ?? gi}>
+          {group.label && (
+            <h3 className="border-b border-border bg-surface px-2 py-1 text-xs font-semibold text-text-secondary">
+              {group.label}
+            </h3>
+          )}
+          <ul role="listbox" aria-multiselectable aria-label={group.label ?? undefined}>
+            {group.rows.map((entry) => {
+              const selected = selection.includes(entry.entry_id);
+              return (
+                <li
+                  key={entry.entry_id}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={(e) => onRowClick(e, entry)}
+                  onDoubleClick={() => onOpen(entry)}
+                  onContextMenu={(e) => onContextMenu(e, entry)}
+                  className={`grid h-9 cursor-default grid-cols-[1fr_7rem_6rem_5rem] items-center border-b border-border text-[13px] ${
+                    selected ? "bg-accent text-accent-foreground" : "hover:bg-surface"
+                  }`}
+                >
+                  <span className="flex min-w-0 items-center gap-2 px-2">
+                    {entry.entry_type === "folder" ? (
+                      <FolderIcon className="shrink-0" />
+                    ) : (
+                      <FileIcon className="shrink-0" />
+                    )}
+                    <span className="min-w-0">
+                      <span className="block truncate" title={entry.entry_name}>
+                        {entry.entry_name}
+                        {entry.is_new ? " •" : ""}
+                      </span>
+                      {showPath && (
+                        <span
+                          className={`block truncate text-xs ${selected ? "" : "text-text-secondary"}`}
+                        >
+                          {entry.entry_path}
+                        </span>
+                      )}
                     </span>
-                  )}
-                </span>
-              </span>
-              <span className="px-2 tabular-nums">{formatDate(entry.modified_date)}</span>
-              <span className="px-2 text-right tabular-nums">
-                {entry.entry_type === "folder" ? "—" : formatBytes(entry.file_size)}
-              </span>
-              <span className="px-2 tabular-nums">
-                {entry.total_page != null ? entry.total_page : "—"}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+                  </span>
+                  <span className="px-2 tabular-nums">
+                    {formatDate(entry.modified_date)}
+                  </span>
+                  <span className="px-2 text-right tabular-nums">
+                    {entry.entry_type === "folder" ? "—" : formatBytes(entry.file_size)}
+                  </span>
+                  <span className="px-2 tabular-nums">
+                    {entry.total_page != null ? entry.total_page : "—"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
@@ -355,6 +440,7 @@ function GridMode({
               onClick={(e) => onRowClick(e, entry)}
               onDoubleClick={() => onOpen(entry)}
               onContextMenu={(e) => onContextMenu(e, entry)}
+              aria-pressed={selected}
               className={`flex flex-col items-center gap-2 border px-2 py-3 ${
                 selected
                   ? "border-text bg-accent text-accent-foreground"
@@ -391,6 +477,7 @@ function DeleteDialog({
   entries: Entry[];
   onClose: () => void;
 }) {
+  const t = useT();
   const toast = useApp((s) => s.toast);
   const [busy, setBusy] = useState(false);
   const names = ids
@@ -402,7 +489,7 @@ function DeleteDialog({
     try {
       await ipc.deleteEntries(ids);
       useBrowse.getState().setSelection([]);
-      toast(`Deleted ${ids.length} item${ids.length > 1 ? "s" : ""}`);
+      toast(t("deleteDialog.deleted", { n: ids.length }));
       onClose();
     } catch (err) {
       toast(errorMessage(err), "error");
@@ -412,34 +499,37 @@ function DeleteDialog({
 
   return (
     <Dialog
-      title={`Delete ${ids.length > 1 ? `${ids.length} items` : "item"}`}
+      title={
+        ids.length > 1
+          ? t("deleteDialog.titleMany", { n: ids.length })
+          : t("deleteDialog.titleOne")
+      }
       onClose={onClose}
     >
-      <p className="mb-2">
-        This permanently deletes from the device (folders including their contents). This
-        cannot be undone.
-      </p>
+      <p className="mb-2">{t("deleteDialog.body")}</p>
       <ul className="mb-4 max-h-32 overflow-y-auto border border-border px-2 py-1 text-xs text-text-secondary">
         {names.map((n) => (
           <li key={n} className="truncate">
             {n}
           </li>
         ))}
-        {ids.length > names.length && <li>… and {ids.length - names.length} more</li>}
+        {ids.length > names.length && (
+          <li>{t("deleteDialog.more", { n: ids.length - names.length })}</li>
+        )}
       </ul>
       <div className="flex justify-end gap-2">
         <button
           onClick={onClose}
           className="border border-border px-3 py-1.5 hover:border-text"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           onClick={doDelete}
           disabled={busy}
           className="border-2 border-text bg-bg px-3 py-1.5 font-semibold disabled:opacity-50"
         >
-          {busy ? "Deleting…" : "Delete"}
+          {busy ? t("common.deleting") : t("common.delete")}
         </button>
       </div>
     </Dialog>
@@ -447,6 +537,7 @@ function DeleteDialog({
 }
 
 function RenameDialog({ entry }: { entry: Entry }) {
+  const t = useT();
   const toast = useApp((s) => s.toast);
   const close = () => useBrowse.getState().setRenameTarget(null);
   const [name, setName] = useState(entry.entry_name);
@@ -464,12 +555,13 @@ function RenameDialog({ entry }: { entry: Entry }) {
   };
 
   return (
-    <Dialog title="Rename" onClose={close}>
+    <Dialog title={t("renameDialog.title")} onClose={close}>
       <input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && name.trim() && doRename()}
+        aria-label={t("renameDialog.title")}
         className="mb-4 w-full border border-border bg-bg px-2 py-1.5 focus:border-text focus:outline-none"
       />
       <div className="flex justify-end gap-2">
@@ -477,14 +569,14 @@ function RenameDialog({ entry }: { entry: Entry }) {
           onClick={close}
           className="border border-border px-3 py-1.5 hover:border-text"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           onClick={doRename}
           disabled={busy || name.trim() === "" || name.trim() === entry.entry_name}
           className="border border-accent bg-accent px-3 py-1.5 text-accent-foreground disabled:opacity-50"
         >
-          Rename
+          {t("common.rename")}
         </button>
       </div>
     </Dialog>
@@ -492,6 +584,7 @@ function RenameDialog({ entry }: { entry: Entry }) {
 }
 
 function NewFolderDialog() {
+  const t = useT();
   const toast = useApp((s) => s.toast);
   const path = useBrowse((s) => s.path);
   const close = () => useBrowse.getState().setNewFolderOpen(false);
@@ -511,13 +604,14 @@ function NewFolderDialog() {
   };
 
   return (
-    <Dialog title="New folder" onClose={close}>
+    <Dialog title={t("newFolderDialog.title")} onClose={close}>
       <input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && name.trim() && doCreate()}
-        placeholder="Folder name"
+        placeholder={t("newFolderDialog.placeholder")}
+        aria-label={t("newFolderDialog.placeholder")}
         className="mb-4 w-full border border-border bg-bg px-2 py-1.5 placeholder:text-text-secondary focus:border-text focus:outline-none"
       />
       <div className="flex justify-end gap-2">
@@ -525,14 +619,14 @@ function NewFolderDialog() {
           onClick={close}
           className="border border-border px-3 py-1.5 hover:border-text"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         <button
           onClick={doCreate}
           disabled={busy || name.trim() === ""}
           className="border border-accent bg-accent px-3 py-1.5 text-accent-foreground disabled:opacity-50"
         >
-          Create
+          {t("common.create")}
         </button>
       </div>
     </Dialog>
@@ -541,16 +635,17 @@ function NewFolderDialog() {
 
 /** Overwrite / keep-both / skip decision for conflicting uploads (FR-TRF-9). */
 function ConflictDialog() {
+  const t = useT();
   const prompt = useBrowse((s) => s.conflictPrompt)!;
   const resolve = useBrowse((s) => s.resolveConflicts);
   const close = () => useBrowse.getState().setConflictPrompt(null);
 
   return (
-    <Dialog title="Files already exist" onClose={close}>
+    <Dialog title={t("conflictDialog.title")} onClose={close}>
       <p className="mb-2">
         {prompt.conflicts.length === 1
-          ? "One file already exists in this folder:"
-          : `${prompt.conflicts.length} files already exist in this folder:`}
+          ? t("conflictDialog.bodyOne")
+          : t("conflictDialog.bodyMany", { n: prompt.conflicts.length })}
       </p>
       <ul className="mb-4 max-h-32 overflow-y-auto border border-border px-2 py-1 text-xs text-text-secondary">
         {prompt.conflicts.map((c) => (
@@ -564,19 +659,19 @@ function ConflictDialog() {
           onClick={() => void resolve("skip")}
           className="border border-border px-3 py-1.5 hover:border-text"
         >
-          Skip
+          {t("conflictDialog.skip")}
         </button>
         <button
           onClick={() => void resolve("keepboth")}
           className="border border-border px-3 py-1.5 hover:border-text"
         >
-          Keep both
+          {t("conflictDialog.keepBoth")}
         </button>
         <button
           onClick={() => void resolve("overwrite")}
           className="border border-accent bg-accent px-3 py-1.5 text-accent-foreground"
         >
-          Overwrite
+          {t("conflictDialog.overwrite")}
         </button>
       </div>
     </Dialog>

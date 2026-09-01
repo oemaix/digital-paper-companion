@@ -182,14 +182,6 @@ impl DeviceClient {
         Ok(format!("Credentials={}", self.cookie.read().await))
     }
 
-    pub(crate) fn http(&self) -> &Client {
-        &self.http
-    }
-
-    pub(crate) fn api_base(&self) -> &str {
-        &self.api_base
-    }
-
     /// GET a JSON body from `path`.
     pub(crate) async fn get_json<R: DeserializeOwned>(&self, path: &str) -> Result<R, Error> {
         let p = path.to_string();
@@ -227,6 +219,51 @@ impl DeviceClient {
         json_or_error(resp).await
     }
 
+    /// PUT a local file as a `multipart/form-data` upload with a single
+    /// `file` part (protocol §8). Streams from disk; sends Content-Length
+    /// because the device rejects chunked uploads.
+    pub(crate) async fn put_file_multipart(
+        &self,
+        path: &str,
+        file_name: &str,
+        local_path: &std::path::Path,
+    ) -> Result<(), Error> {
+        use reqwest::multipart::{Form, Part};
+
+        let len = tokio::fs::metadata(local_path).await?.len();
+        let file = tokio::fs::File::open(local_path).await?;
+        let stream = tokio_util::io::ReaderStream::new(file);
+        let part = Part::stream_with_length(reqwest::Body::wrap_stream(stream), len)
+            .file_name(crate::api::entries::form_encode(file_name))
+            .mime_str("application/octet-stream")
+            .map_err(|e| Error::Protocol(e.to_string()))?;
+        let form = Form::new().part("file", part);
+
+        // One-shot request: the streaming body is not replayable, so this
+        // bypasses `send`'s retry and ensures authentication up front.
+        let cookie = self.cookie_header().await?;
+        let resp = self
+            .http
+            .put(format!("{}{}", self.api_base, path))
+            .header(reqwest::header::COOKIE, cookie)
+            .multipart(form)
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            return Ok(());
+        }
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        Err(Error::Api {
+            status,
+            message: if text.is_empty() {
+                "upload failed".into()
+            } else {
+                device_message(&text)
+            },
+        })
+    }
+
     /// DELETE `path`, expecting a success status.
     pub(crate) async fn delete_ok(&self, path: &str) -> Result<(), Error> {
         let p = path.to_string();
@@ -241,6 +278,58 @@ impl DeviceClient {
     pub fn client_id(&self) -> &str {
         &self.credentials.client_id
     }
+}
+
+/// Fetches the device's TLS server certificate as PEM without verifying it
+/// (trust-on-first-use). Used only for credential import (FR-REG-6): users
+/// who paired with Sony's app or `dptrp1` have the client id and private
+/// key but not the certificate from registration message M5. The imported
+/// credentials are validated immediately afterwards by authenticating with
+/// this certificate pinned — the same trust level Sony's own client had
+/// (docs/07 §2).
+pub async fn fetch_server_certificate(addr: &DeviceAddr) -> Result<String, Error> {
+    let captured: Arc<std::sync::Mutex<Option<Vec<u8>>>> = Arc::new(std::sync::Mutex::new(None));
+
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+    let supported = provider.signature_verification_algorithms;
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_safe_default_protocol_versions()
+        .map_err(|e| Error::Crypto(format!("rustls setup failed: {e}")))?
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(pin::CapturingVerifier {
+            captured: captured.clone(),
+            supported,
+        }))
+        .with_no_client_auth();
+
+    let http = Client::builder()
+        .use_preconfigured_tls(config)
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
+        .build()?;
+    // Any request completes the handshake; the response status is irrelevant
+    // (unauthenticated /ping returns an error status).
+    let _ = http.get(format!("{}/ping", addr.api_base())).send().await?;
+
+    let der = captured
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or_else(|| Error::Crypto("no server certificate captured".into()))?;
+    Ok(der_to_pem(&der))
+}
+
+/// Wraps DER certificate bytes into a PEM block.
+fn der_to_pem(der: &[u8]) -> String {
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
+    let mut pem = String::from("-----BEGIN CERTIFICATE-----\n");
+    for chunk in b64.as_bytes().chunks(64) {
+        pem.push_str(std::str::from_utf8(chunk).unwrap());
+        pem.push('\n');
+    }
+    pem.push_str("-----END CERTIFICATE-----\n");
+    pem
 }
 
 /// Convenience: register interactively then connect. Not used by the app
@@ -349,6 +438,51 @@ mod pin {
                     "device certificate does not match pin".into(),
                 ))
             }
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, TlsError> {
+            verify_tls12_signature(message, cert, dss, &self.supported)
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &CertificateDer<'_>,
+            dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, TlsError> {
+            verify_tls13_signature(message, cert, dss, &self.supported)
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            self.supported.supported_schemes()
+        }
+    }
+
+    /// A verifier that accepts any certificate and records the leaf DER.
+    /// Only used by [`super::fetch_server_certificate`] (trust-on-first-use
+    /// during credential import, FR-REG-6) — never for regular sessions.
+    #[derive(Debug)]
+    pub struct CapturingVerifier {
+        pub captured: std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>,
+        pub supported: WebPkiSupportedAlgorithms,
+    }
+
+    impl ServerCertVerifier for CapturingVerifier {
+        fn verify_server_cert(
+            &self,
+            end_entity: &CertificateDer<'_>,
+            _intermediates: &[CertificateDer<'_>],
+            _server_name: &ServerName<'_>,
+            _ocsp_response: &[u8],
+            _now: UnixTime,
+        ) -> Result<ServerCertVerified, TlsError> {
+            *self.captured.lock().unwrap() = Some(end_entity.as_ref().to_vec());
+            Ok(ServerCertVerified::assertion())
         }
 
         fn verify_tls12_signature(

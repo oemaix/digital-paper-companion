@@ -6,6 +6,10 @@ a replacement for Sony's discontinued official Digital Paper App.
 
 Built with **Rust** and **Tauri 2**; runs on Windows, macOS and Linux.
 
+> Pre-release (`0.2.x`). Feature status is below; the phase plan is in
+> [docs/08-roadmap.md](docs/08-roadmap.md). The full product definition
+> lives in [docs/](docs/).
+
 ## Screenshots
 
 Library browser:
@@ -20,10 +24,6 @@ Device status:
 
 ![Device settings](docs/images/device-settings.png)
 
-> Pre-release (`0.2.x`). Feature status is below; the phase plan is in
-> [docs/08-roadmap.md](docs/08-roadmap.md). The full product definition
-> lives in [docs/](docs/).
-
 ## Features
 
 | Feature                                                      | Status      |
@@ -33,12 +33,34 @@ Device status:
 | Transfer queue (progress, cancel, retry)                     | Implemented |
 | Folder sync: two-way or mirror, preview, schedule, conflicts | Implemented |
 | Device status and set clock from this computer               | Implemented |
-| Notes view (`Document/Note`)                                 | Implemented |
+| Notes view (`Document/Note`, grouped by month)               | Implemented |
 | Open a document on the device                                | Implemented |
-| Device settings editor, Wi-Fi, screenshots                   | Planned     |
-| Note templates                                               | Planned     |
-| USB Ethernet-over-USB and first-class Bluetooth setup        | Planned     |
+| Device settings editor (incl. advanced keys), Wi-Fi, screenshots | Implemented |
+| Note templates (add, delete)                                 | Implemented |
+| USB connection (Ethernet-over-USB mode switch)               | Implemented |
+| Bluetooth PAN address preset                                 | Implemented |
+| Multiple devices, switch from the sidebar                    | Implemented |
+| Credential import from Sony's app / `dptrp1`                 | Implemented |
+| English and German UI                                        | Implemented |
 | Automatic Update Check                                       | Planned     |
+
+## Connecting over USB or Bluetooth
+
+Besides Wi-Fi, the device speaks the same protocol over two other
+transports (see [docs/sony-digital-paper-protocol.md](docs/sony-digital-paper-protocol.md) §2):
+
+**USB.** Plug the device in; it first enumerates as a serial port. In
+*Connect to device → Connect via USB cable*, switch it to network mode
+(RNDIS for Windows, CDC/ECM for macOS/Linux — chosen automatically). The
+device then re-appears as a network interface; configure that interface
+for link-local addressing (no DHCP) and connect via discovery or
+`digitalpaper.local`. On Windows 11 the deprecated RNDIS driver may be
+missing; use the CDC/ECM mode instead.
+
+**Bluetooth PAN.** Pair the device in your computer's Bluetooth settings
+and enable Bluetooth on the device. It joins as a personal-area network
+with the fixed address `172.25.47.1` — *Connect to device → Use Bluetooth
+PAN address* pre-fills it.
 
 ## Development
 
@@ -59,12 +81,15 @@ docker compose run --rm dev npm run check  # lint + typecheck + tests
 docker compose run --rm dev npm run build  # release bundles
 ```
 
-Running the GUI (`npm run dev`) from inside the container works on an X11
-host after allowing local connections once (`xhost +local:`); on Wayland,
-prefer running the GUI via Option B and use the container for
-building/testing. Cursor/VS Code users can instead open the repo as a
-**Dev Container** (configuration in `.devcontainer/`), which uses the same
-compose service.
+Running the GUI (`npm run dev`) from inside the container works on X11
+and on Wayland (via XWayland). If the window fails with
+*“Authorization required …: Failed to initialize GTK”*, allow local X
+connections once on the **host**: `xhost +local:` — then rerun. The
+compose file also forwards `XAUTHORITY`/`XDG_RUNTIME_DIR`, so with an
+exported xauth cookie no `xhost` is needed (recreate the container after
+pulling compose changes). Cursor/VS Code users can instead open the repo
+as a **Dev Container** (configuration in `.devcontainer/`), which uses
+the same compose service.
 
 Note on permissions: the compose service runs as container root by default,
 which is correct for **rootless Docker** (container root = your host user).
