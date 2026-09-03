@@ -43,16 +43,11 @@ services:
       - cargo-registry:/usr/local/cargo/registry
       - target:/workspace/target
       - node-modules:/workspace/node_modules
-      # GitHub CLI auth for git pushes from inside the container. Default:
-      # a named volume — run `gh auth login` once in the container, it then
-      # survives rebuilds (the volume starts EMPTY; it does not copy any
-      # host login). To reuse an existing host login instead, bind-mount it:
-      #   DPC_GH_CONFIG=$HOME/.config/gh docker compose run --rm dev
-      # (or export DPC_GH_CONFIG in your shell/.env). `gh auth setup-git`
-      # wires git up to it (devcontainer runs that automatically).
-      # Note: mounts at /root for the default root user; with
-      # DPC_CONTAINER_USER=dev the config lives under /home/dev instead.
-      - ${DPC_GH_CONFIG:-gh-config}:/root/.config/gh
+      # GitHub CLI auth (`gh auth login`) survives container rebuilds; git
+      # uses it via `gh auth setup-git` (devcontainer postCreateCommand).
+      # Note: covers the default root user; with DPC_CONTAINER_USER=dev
+      # log in again inside the container (config lives under /home/dev).
+      - gh-config:/root/.config/gh
       # X11 socket for running the Tauri window from inside the container
       # (requires `xhost +local:` on the host, or a forwarded XAUTHORITY
       # cookie; see README).
