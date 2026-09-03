@@ -273,7 +273,7 @@ export default function LibraryView({ notes = false }: { notes?: boolean }) {
       )}
 
       {browse.busy && (
-        <div className="absolute bottom-2 left-2 border border-border bg-surface px-2 py-1 text-xs text-text-secondary">
+        <div className="absolute bottom-2 start-2 border border-border bg-surface px-2 py-1 text-xs text-text-secondary">
           {browse.busy}
         </div>
       )}
@@ -355,7 +355,7 @@ function ListMode({
     sortable ? (
       <button
         onClick={() => onSort(key)}
-        className={`flex items-center gap-1 px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-text-secondary hover:text-text ${extra}`}
+        className={`flex items-center gap-1 px-2 py-1 text-start text-xs font-semibold uppercase tracking-wide text-text-secondary hover:text-text ${extra}`}
       >
         {label}
         {sortKey === key && <span aria-hidden>{sortAsc ? "▲" : "▼"}</span>}
@@ -442,7 +442,7 @@ function ListMode({
               <span className="px-2 tabular-nums">
                 {formatDate(entry.modified_date)}
               </span>
-              <span className="px-2 text-right tabular-nums">
+              <span className="px-2 text-end tabular-nums">
                 {entry.entry_type === "folder" ? "—" : formatBytes(entry.file_size)}
               </span>
               <span className="px-2 tabular-nums">

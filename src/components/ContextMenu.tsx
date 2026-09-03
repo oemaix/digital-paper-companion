@@ -90,7 +90,7 @@ export default function ContextMenu({
               onClose();
               item.onClick?.();
             }}
-            className="block w-full px-3 py-1.5 text-left text-[13px] hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text"
+            className="block w-full px-3 py-1.5 text-start text-[13px] hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text"
           >
             {item.label}
           </button>

@@ -16,7 +16,7 @@ export default function TransfersPanel({ onClose }: { onClose: () => void }) {
   );
 
   return (
-    <aside className="absolute bottom-7 right-0 top-10 z-40 flex w-80 flex-col border-l border-border bg-surface">
+    <aside className="absolute bottom-7 end-0 top-10 z-40 flex w-80 flex-col border-s border-border bg-surface">
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <h2 className="text-[13px] font-semibold">{t("transfers.title")}</h2>
         <div className="flex items-center gap-2">

@@ -75,7 +75,7 @@ export default function SyncConfirmDialog({
           </button>
           <button
             onClick={() => void decide("cancel")}
-            className="ml-auto border border-border px-3 py-1.5 text-text-secondary hover:border-text hover:text-text"
+            className="ms-auto border border-border px-3 py-1.5 text-text-secondary hover:border-text hover:text-text"
           >
             {t("syncConfirm.cancelRun")}
           </button>

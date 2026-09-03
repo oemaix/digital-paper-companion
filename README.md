@@ -6,7 +6,7 @@ a replacement for Sony's discontinued official Digital Paper App.
 
 Built with **Rust** and **Tauri 2**; runs on Windows, macOS and Linux.
 
-> Pre-release (`0.2.x`). Feature status is below; the phase plan is in
+> Pre-release (`0.4.x`). Feature status is below; the phase plan is in
 > [docs/08-roadmap.md](docs/08-roadmap.md). The full product definition
 > lives in [docs/](docs/).
 
@@ -41,7 +41,7 @@ Device status:
 | Bluetooth PAN address preset                                 | Implemented |
 | Multiple devices, switch from the sidebar                    | Implemented |
 | Credential import from Sony's app / `dptrp1`                 | Implemented |
-| English and German UI                                        | Implemented |
+| UI in 10 languages (EN, DE, ES, FR, IT, JA, ZH-Hans, ZH-Hant, AR, HE) incl. RTL layout | Implemented |
 | Automatic Update Check                                       | Implemented |
 
 ## Installing unsigned builds

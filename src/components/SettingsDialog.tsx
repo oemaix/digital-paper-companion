@@ -257,7 +257,7 @@ function RectSwitch({
     >
       <span
         className={`absolute top-0.5 h-3 w-4 transition-all ${
-          checked ? "left-4 bg-bg" : "left-0.5 bg-text-secondary"
+          checked ? "start-4 bg-bg" : "start-0.5 bg-text-secondary"
         }`}
       />
     </button>
@@ -779,8 +779,8 @@ function WifiSection() {
       <details>
         <summary className={SECTION_SUMMARY}>{t("wifi.title")}</summary>
 
-        {/* pr-1 lines the switch up with the pencil icons (their p-1 inset). */}
-        <div className="mt-2 flex items-center gap-2 pr-1">
+        {/* pe-1 lines the switch up with the pencil icons (their p-1 inset). */}
+        <div className="mt-2 flex items-center gap-2 pe-1">
           <span className="w-44 shrink-0 text-text-secondary">{t("wifi.radio")}</span>
           <span className="min-w-0 flex-1" />
           <RectSwitch

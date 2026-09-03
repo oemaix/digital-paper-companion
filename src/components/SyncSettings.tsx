@@ -528,7 +528,7 @@ function History({ pairId }: { pairId: string }) {
   }, [pairId]);
 
   // A left rule ties the expanded history to the pair above (no outer box).
-  const block = "mt-1.5 border-l-2 border-border pl-2.5 text-xs";
+  const block = "mt-1.5 border-s-2 border-border ps-2.5 text-xs";
 
   if (records === null) {
     return (

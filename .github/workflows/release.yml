@@ -69,11 +69,11 @@ jobs:
           # MSI (WiX) only accepts a numeric pre-release, e.g. 0.2.0-1
           # not 0.2.0-pre.1.
           releaseBody: >-
-            Phase 4 release — automatic update check (disableable in
-            Settings), performance hardening for large libraries
-            (virtualized lists, engine perf test suite). Builds are not
-            code-signed; see the README for one-time first-launch steps
-            on Windows and macOS.
+            Phase 4 release — the UI now ships in 10 languages: English,
+            German, Spanish, French, Italian, Japanese, Simplified and
+            Traditional Chinese, plus Arabic and Hebrew with a full
+            right-to-left layout. Builds are not code-signed; see the
+            README for one-time first-launch steps on Windows and macOS.
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

@@ -29,7 +29,7 @@ import {
 import { useApp } from "./lib/store";
 import { useBrowse } from "./lib/browse";
 import { ipc, errorMessage } from "./lib/ipc";
-import { useT, type MessageKey } from "./lib/i18n";
+import { useI18n, useT, type MessageKey } from "./lib/i18n";
 
 /**
  * Application shell per docs/05 §2:
@@ -79,7 +79,9 @@ export default function App() {
   };
 
   // Breadcrumb segments relative to the view root. Notes is a flat view
-  // (docs/05 §3.3), so it shows only its label.
+  // (docs/05 §3.3), so it shows only its label. `t` is a stable reference,
+  // so the memo must depend on the locale itself to refresh on change.
+  const locale = useI18n((s) => s.locale);
   const crumbs = useMemo(() => {
     if (!view.root || view.id === "notes") return [];
     const rel = browse.path.slice(view.root.length).split("/").filter(Boolean);
@@ -92,7 +94,7 @@ export default function App() {
       out.push({ label: seg, path: acc });
     }
     return out;
-  }, [view, browse.path, t]);
+  }, [view, browse.path, t, locale]);
 
   const activeTransfers = app.transfers.filter(
     (t) => t.status === "queued" || t.status === "running",
@@ -180,7 +182,7 @@ export default function App() {
               <span key={c.path} className="flex min-w-0 items-center gap-0.5">
                 {i > 0 && (
                   <ChevronRightIcon
-                    className="shrink-0 text-text-secondary"
+                    className="shrink-0 text-text-secondary rtl:-scale-x-100"
                     width={12}
                     height={12}
                   />
@@ -356,7 +358,7 @@ export default function App() {
         >
           <TransfersIcon />
           {activeTransfers.length > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 min-w-4 border border-border bg-bg px-0.5 text-center text-[10px] leading-4 tabular-nums">
+            <span className="absolute -end-0.5 -top-0.5 min-w-4 border border-border bg-bg px-0.5 text-center text-[10px] leading-4 tabular-nums">
               {activeTransfers.length}
             </span>
           )}
@@ -393,7 +395,7 @@ export default function App() {
                 key={id}
                 onClick={() => switchView(id)}
                 aria-current={id === activeView ? "page" : undefined}
-                className={`flex items-center gap-2 px-2 py-1.5 text-left text-[13px] ${
+                className={`flex items-center gap-2 px-2 py-1.5 text-start text-[13px] ${
                   id === activeView
                     ? "bg-accent text-accent-foreground"
                     : "text-text-secondary hover:bg-bg hover:text-text"
@@ -493,7 +495,7 @@ export default function App() {
             )}
           </button>
         )}
-        <span className="ml-auto tabular-nums">v{app.version || "…"}</span>
+        <span className="ms-auto tabular-nums">v{app.version || "…"}</span>
       </footer>
 
       {/* Panels, dialogs, menus, toasts */}

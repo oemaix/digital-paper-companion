@@ -13,7 +13,7 @@ export default function Toasts() {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-10 right-3 z-50 flex w-80 flex-col gap-2">
+    <div className="fixed bottom-10 end-3 z-50 flex w-80 flex-col gap-2">
       {toasts.map((toast) => (
         <div
           key={toast.id}

@@ -683,7 +683,7 @@ function ImportPanel({ onBack, onDone }: { onBack: () => void; onDone: () => voi
         <button
           disabled={!valid || busy}
           onClick={() => void doImport()}
-          className="ml-auto border border-accent bg-accent px-3 py-1.5 text-accent-foreground disabled:opacity-50"
+          className="ms-auto border border-accent bg-accent px-3 py-1.5 text-accent-foreground disabled:opacity-50"
         >
           {busy ? t("import.importing") : t("import.import")}
         </button>
