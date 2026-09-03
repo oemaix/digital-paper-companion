@@ -77,7 +77,17 @@ export interface AppSettings {
   version: number;
   theme: string;
   language: string;
+  /** Check for app updates on startup (FR-APP-5; NFR-SEC-4). */
+  update_check: boolean;
   last_active_serial?: string | null;
+}
+
+/** Result of an update check (FR-APP-5): notify-only, no auto-install. */
+export interface UpdateCheck {
+  current: string;
+  latest?: string | null;
+  url: string;
+  update_available: boolean;
 }
 
 export interface NoteTemplate {
@@ -256,6 +266,8 @@ export const ipc = {
   getSettings: () => invoke<AppSettings>("get_settings"),
   setTheme: (theme: string) => invoke<void>("set_theme", { theme }),
   setLanguage: (language: string) => invoke<void>("set_language", { language }),
+  setUpdateCheck: (enabled: boolean) => invoke<void>("set_update_check", { enabled }),
+  checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
 
   connectionState: () => invoke<ConnectionPayload>("connection_state"),
   discoverDevices: (seconds?: number) =>

@@ -18,6 +18,10 @@ pub struct Settings {
     /// (FR-APP-4, NFR-I18N-1).
     #[serde(default = "default_language")]
     pub language: String,
+    /// Check for app updates on startup (FR-APP-5). User-disableable —
+    /// the only network connection besides the device (NFR-SEC-4).
+    #[serde(default = "default_true")]
+    pub update_check: bool,
     #[serde(default)]
     pub last_active_serial: Option<String>,
 }
@@ -38,6 +42,7 @@ impl Default for Settings {
             version: 1,
             theme: default_theme(),
             language: default_language(),
+            update_check: true,
             last_active_serial: None,
         }
     }

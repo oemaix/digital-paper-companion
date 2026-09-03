@@ -17,6 +17,7 @@ import {
   type SyncPairInfo,
   type SyncConfirmationRequest,
   type SyncRunRecord,
+  type UpdateCheck,
 } from "./ipc";
 import { t, useI18n } from "./i18n";
 
@@ -39,6 +40,8 @@ interface AppStore {
   syncPairs: SyncPairInfo[] | null;
   syncConfirmation: SyncConfirmationRequest | null;
   lastSyncRecord: SyncRunRecord | null;
+  update: UpdateCheck | null;
+  updateChecking: boolean;
 
   init: () => Promise<void>;
   refreshEntries: (force?: boolean) => Promise<void>;
@@ -46,6 +49,8 @@ interface AppStore {
   refreshKnownDevices: () => Promise<void>;
   setTheme: (theme: string) => Promise<void>;
   setLanguage: (language: string) => Promise<void>;
+  setUpdateCheck: (enabled: boolean) => Promise<void>;
+  checkForUpdate: (silent?: boolean) => Promise<void>;
   toast: (text: string, kind?: Toast["kind"]) => void;
   dismissToast: (id: number) => void;
 }
@@ -66,6 +71,8 @@ export const useApp = create<AppStore>((set, get) => ({
   syncPairs: null,
   syncConfirmation: null,
   lastSyncRecord: null,
+  update: null,
+  updateChecking: false,
 
   init: async () => {
     if (initialized) return;
@@ -130,6 +137,13 @@ export const useApp = create<AppStore>((set, get) => ({
     if (connection.state === "connected") {
       void get().refreshEntries();
     }
+
+    // Startup update check (FR-APP-5), delayed so it never competes with
+    // first render or auto-connect (NFR-PRF-1). Skipped when disabled
+    // (NFR-SEC-4).
+    if (settings.update_check) {
+      window.setTimeout(() => void get().checkForUpdate(true), 3000);
+    }
   },
 
   refreshEntries: async (force = false) => {
@@ -176,6 +190,31 @@ export const useApp = create<AppStore>((set, get) => ({
     const settings = get().settings;
     set({ settings: settings ? { ...settings, language } : settings });
     useI18n.getState().setLanguageSetting(language);
+  },
+
+  setUpdateCheck: async (enabled) => {
+    await ipc.setUpdateCheck(enabled);
+    const settings = get().settings;
+    set({ settings: settings ? { ...settings, update_check: enabled } : settings });
+  },
+
+  /** Checks for a newer release; `silent` suppresses error/up-to-date toasts
+   *  (used for the automatic startup check). */
+  checkForUpdate: async (silent = false) => {
+    if (get().updateChecking) return;
+    set({ updateChecking: true });
+    try {
+      const update = await ipc.checkForUpdate();
+      set({ update });
+      if (update.update_available) {
+        get().toast(t("update.availableToast", { version: update.latest ?? "?" }));
+      }
+    } catch (err) {
+      if (silent) console.warn("update check failed", err);
+      else get().toast(errorMessage(err), "error");
+    } finally {
+      set({ updateChecking: false });
+    }
   },
 
   toast: (text, kind = "info") => {

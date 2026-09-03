@@ -62,6 +62,8 @@ pub fn run() {
             commands::get_settings,
             commands::set_theme,
             commands::set_language,
+            commands::set_update_check,
+            commands::check_for_update,
             commands::connection_state,
             commands::discover_devices,
             commands::probe_device,

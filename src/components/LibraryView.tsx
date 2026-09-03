@@ -14,6 +14,7 @@ import {
 import { ipc, errorMessage, type Entry } from "../lib/ipc";
 import { formatBytes, formatDate, formatMonth } from "../lib/format";
 import { useT } from "../lib/i18n";
+import { useVirtualRows } from "../lib/virtual";
 
 /** Rows grouped under an optional heading (months in the notes view). */
 interface RowGroup {
@@ -302,6 +303,13 @@ export default function LibraryView({ notes = false }: { notes?: boolean }) {
 
 // ---- list mode -------------------------------------------------------------
 
+/** Fixed row heights for virtualization (NFR-PRF-2). */
+const HEADER_ROW_H = 25;
+const ENTRY_ROW_H = 36;
+
+/** A group header or an entry, flattened for the virtualized list. */
+type FlatRow = { header: string } | { entry: Entry };
+
 function ListMode({
   groups,
   sortable,
@@ -326,6 +334,23 @@ function ListMode({
   onContextMenu: (e: React.MouseEvent, entry: Entry) => void;
 }) {
   const t = useT();
+
+  // Flatten groups to one row model so a single virtual window covers
+  // month headers and entries alike.
+  const flat = useMemo<FlatRow[]>(() => {
+    const out: FlatRow[] = [];
+    for (const group of groups) {
+      if (group.label) out.push({ header: group.label });
+      for (const entry of group.rows) out.push({ entry });
+    }
+    return out;
+  }, [groups]);
+  const heights = useMemo(
+    () => flat.map((row) => ("header" in row ? HEADER_ROW_H : ENTRY_ROW_H)),
+    [flat],
+  );
+  const virtual = useVirtualRows(heights);
+
   const header = (key: SortKey, label: string, extra = "") =>
     sortable ? (
       <button
@@ -344,7 +369,7 @@ function ListMode({
     );
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div ref={virtual.containerRef} className="min-h-0 flex-1 overflow-y-auto">
       <div className="sticky top-0 z-10 grid grid-cols-[1fr_7rem_6rem_5rem] border-b border-border bg-surface">
         {header("name", t("library.colName"))}
         {header("modified", t("library.colModified"))}
@@ -353,68 +378,91 @@ function ListMode({
           {t("library.colPages")}
         </span>
       </div>
-      {groups.map((group, gi) => (
-        <div key={group.label ?? gi}>
-          {group.label && (
-            <h3 className="border-b border-border bg-surface px-2 py-1 text-xs font-semibold text-text-secondary">
-              {group.label}
-            </h3>
-          )}
-          <ul role="listbox" aria-multiselectable aria-label={group.label ?? undefined}>
-            {group.rows.map((entry) => {
-              const selected = selection.includes(entry.entry_id);
-              return (
-                <li
-                  key={entry.entry_id}
-                  role="option"
-                  aria-selected={selected}
-                  onClick={(e) => onRowClick(e, entry)}
-                  onDoubleClick={() => onOpen(entry)}
-                  onContextMenu={(e) => onContextMenu(e, entry)}
-                  className={`grid h-9 cursor-default grid-cols-[1fr_7rem_6rem_5rem] items-center border-b border-border text-[13px] ${
-                    selected ? "bg-accent text-accent-foreground" : "hover:bg-surface"
-                  }`}
-                >
-                  <span className="flex min-w-0 items-center gap-2 px-2">
-                    {entry.entry_type === "folder" ? (
-                      <FolderIcon className="shrink-0" />
-                    ) : (
-                      <FileIcon className="shrink-0" />
-                    )}
-                    <span className="min-w-0">
-                      <span className="block truncate" title={entry.entry_name}>
-                        {entry.entry_name}
-                        {entry.is_new ? " •" : ""}
-                      </span>
-                      {showPath && (
-                        <span
-                          className={`block truncate text-xs ${selected ? "" : "text-text-secondary"}`}
-                        >
-                          {entry.entry_path}
-                        </span>
-                      )}
+      <div
+        role="listbox"
+        aria-multiselectable
+        className="relative"
+        style={{ height: virtual.total }}
+      >
+        {flat.slice(virtual.start, virtual.end).map((row, i) => {
+          const idx = virtual.start + i;
+          const style: React.CSSProperties = {
+            position: "absolute",
+            top: virtual.offsets[idx],
+            left: 0,
+            right: 0,
+            height: heights[idx],
+          };
+          if ("header" in row) {
+            return (
+              <h3
+                key={`h:${row.header}`}
+                style={style}
+                className="flex items-center border-b border-border bg-surface px-2 text-xs font-semibold text-text-secondary"
+              >
+                {row.header}
+              </h3>
+            );
+          }
+          const entry = row.entry;
+          const selected = selection.includes(entry.entry_id);
+          return (
+            <div
+              key={entry.entry_id}
+              role="option"
+              aria-selected={selected}
+              style={style}
+              onClick={(e) => onRowClick(e, entry)}
+              onDoubleClick={() => onOpen(entry)}
+              onContextMenu={(e) => onContextMenu(e, entry)}
+              className={`grid cursor-default grid-cols-[1fr_7rem_6rem_5rem] items-center border-b border-border text-[13px] ${
+                selected ? "bg-accent text-accent-foreground" : "hover:bg-surface"
+              }`}
+            >
+              <span className="flex min-w-0 items-center gap-2 px-2">
+                {entry.entry_type === "folder" ? (
+                  <FolderIcon className="shrink-0" />
+                ) : (
+                  <FileIcon className="shrink-0" />
+                )}
+                <span className="min-w-0">
+                  <span className="block truncate" title={entry.entry_name}>
+                    {entry.entry_name}
+                    {entry.is_new ? " •" : ""}
+                  </span>
+                  {showPath && (
+                    <span
+                      className={`block truncate text-xs ${selected ? "" : "text-text-secondary"}`}
+                    >
+                      {entry.entry_path}
                     </span>
-                  </span>
-                  <span className="px-2 tabular-nums">
-                    {formatDate(entry.modified_date)}
-                  </span>
-                  <span className="px-2 text-right tabular-nums">
-                    {entry.entry_type === "folder" ? "—" : formatBytes(entry.file_size)}
-                  </span>
-                  <span className="px-2 tabular-nums">
-                    {entry.total_page != null ? entry.total_page : "—"}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+                  )}
+                </span>
+              </span>
+              <span className="px-2 tabular-nums">
+                {formatDate(entry.modified_date)}
+              </span>
+              <span className="px-2 text-right tabular-nums">
+                {entry.entry_type === "folder" ? "—" : formatBytes(entry.file_size)}
+              </span>
+              <span className="px-2 tabular-nums">
+                {entry.total_page != null ? entry.total_page : "—"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 // ---- grid mode --------------------------------------------------------------
+
+/** Tile metrics for grid virtualization; mirror `minmax(7.5rem,1fr)` + `gap-2`. */
+const TILE_MIN_W = 120;
+const TILE_H = 88;
+const TILE_GAP = 8;
+const GRID_PAD = 12; // p-3
 
 function GridMode({
   rows,
@@ -429,36 +477,71 @@ function GridMode({
   onOpen: (entry: Entry) => void;
   onContextMenu: (e: React.MouseEvent, entry: Entry) => void;
 }) {
+  // Row-based virtualization (NFR-PRF-2): compute the column count the way
+  // `auto-fill` would, then window over whole tile rows. The width flows
+  // through state because the row model must exist before the hook runs.
+  const [width, setWidth] = useState(0);
+  const cols = Math.max(
+    1,
+    Math.floor((width - 2 * GRID_PAD + TILE_GAP) / (TILE_MIN_W + TILE_GAP)),
+  );
+  const rowCount = Math.ceil(rows.length / cols);
+  const heights = useMemo(
+    () => Array.from({ length: rowCount }, () => TILE_H + TILE_GAP),
+    [rowCount],
+  );
+  const virtual = useVirtualRows(heights);
+  useEffect(() => setWidth(virtual.width), [virtual.width]);
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-3">
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-2">
-        {rows.map((entry) => {
-          const selected = selection.includes(entry.entry_id);
+    <div ref={virtual.containerRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div className="relative" style={{ height: virtual.total + 2 * GRID_PAD }}>
+        {heights.slice(virtual.start, virtual.end).map((_, i) => {
+          const rowIdx = virtual.start + i;
           return (
-            <button
-              key={entry.entry_id}
-              onClick={(e) => onRowClick(e, entry)}
-              onDoubleClick={() => onOpen(entry)}
-              onContextMenu={(e) => onContextMenu(e, entry)}
-              aria-pressed={selected}
-              className={`flex flex-col items-center gap-2 border px-2 py-3 ${
-                selected
-                  ? "border-text bg-accent text-accent-foreground"
-                  : "border-border hover:border-text"
-              }`}
+            <div
+              key={rowIdx}
+              style={{
+                position: "absolute",
+                top: GRID_PAD + virtual.offsets[rowIdx],
+                left: GRID_PAD,
+                right: GRID_PAD,
+                height: TILE_H,
+                display: "grid",
+                gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                gap: TILE_GAP,
+              }}
             >
-              {entry.entry_type === "folder" ? (
-                <FolderIcon width={28} height={28} />
-              ) : (
-                <FileIcon width={28} height={28} />
-              )}
-              <span
-                className="w-full truncate text-center text-xs"
-                title={entry.entry_name}
-              >
-                {entry.entry_name}
-              </span>
-            </button>
+              {rows.slice(rowIdx * cols, (rowIdx + 1) * cols).map((entry) => {
+                const selected = selection.includes(entry.entry_id);
+                return (
+                  <button
+                    key={entry.entry_id}
+                    onClick={(e) => onRowClick(e, entry)}
+                    onDoubleClick={() => onOpen(entry)}
+                    onContextMenu={(e) => onContextMenu(e, entry)}
+                    aria-pressed={selected}
+                    className={`flex h-full flex-col items-center justify-center gap-2 border px-2 ${
+                      selected
+                        ? "border-text bg-accent text-accent-foreground"
+                        : "border-border hover:border-text"
+                    }`}
+                  >
+                    {entry.entry_type === "folder" ? (
+                      <FolderIcon width={28} height={28} />
+                    ) : (
+                      <FileIcon width={28} height={28} />
+                    )}
+                    <span
+                      className="w-full truncate text-center text-xs"
+                      title={entry.entry_name}
+                    >
+                      {entry.entry_name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           );
         })}
       </div>

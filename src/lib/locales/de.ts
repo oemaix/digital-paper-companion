@@ -223,6 +223,17 @@ export const de: Record<MessageKey, string> = {
   "settings.language": "Sprache",
   "settings.languageSystem": "System folgen",
 
+  "settings.updates": "Updates",
+  "settings.updateCheckAuto": "Beim Start auf Updates prüfen",
+  "settings.updateCheckNow": "Jetzt prüfen",
+  "settings.updateChecking": "Prüfe…",
+  "settings.updateUpToDate": "Sie verwenden die neueste Version ({version}).",
+  "settings.updateAvailable":
+    "Version {version} ist verfügbar (installiert: {current}).",
+  "settings.updateOpenPage": "Download-Seite öffnen",
+  "update.availableToast":
+    "Update verfügbar: Version {version} — Download-Link in den Einstellungen",
+
   "device.notConnected":
     "Kein Gerät verbunden. Verbinden Sie ein Gerät, um dessen Status zu sehen.",
   "device.loadingStatus": "Lade Gerätestatus…",

@@ -221,6 +221,16 @@ export const en = {
   "settings.language": "Language",
   "settings.languageSystem": "Follow system",
 
+  "settings.updates": "Updates",
+  "settings.updateCheckAuto": "Check for updates on startup",
+  "settings.updateCheckNow": "Check now",
+  "settings.updateChecking": "Checking…",
+  "settings.updateUpToDate": "You are on the latest version ({version}).",
+  "settings.updateAvailable": "Version {version} is available (installed: {current}).",
+  "settings.updateOpenPage": "Open download page",
+  "update.availableToast":
+    "Update available: version {version} — download link in Settings",
+
   "device.notConnected": "No device connected. Connect a device to see its status.",
   "device.loadingStatus": "Loading device status…",
   "device.device": "Device",

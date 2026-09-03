@@ -50,6 +50,109 @@ pub fn set_language(state: S<'_>, language: String) -> CmdResult<()> {
     state.stores.save_settings(&settings)
 }
 
+// ---- update check (FR-APP-5) --------------------------------------------------
+
+/// GitHub repository whose latest release the update check queries.
+const UPDATE_REPO: &str = "oemaix/digital-paper-companion";
+
+/// Result of an update check: notify-only, the user follows `url` to the
+/// release page — no download, no auto-install (FR-APP-5).
+#[derive(Serialize)]
+pub struct UpdateCheck {
+    pub current: String,
+    pub latest: Option<String>,
+    pub url: String,
+    pub update_available: bool,
+}
+
+/// Enables/disables the automatic check on startup (NFR-SEC-4).
+#[tauri::command]
+pub fn set_update_check(state: S<'_>, enabled: bool) -> CmdResult<()> {
+    let mut settings = state.stores.load_settings();
+    settings.update_check = enabled;
+    state.stores.save_settings(&settings)
+}
+
+/// Fetches the latest GitHub release (static JSON over HTTPS) and compares
+/// it with the running version. This is the app's only non-device network
+/// access and runs only when enabled or manually triggered (NFR-SEC-4).
+#[tauri::command]
+pub async fn check_for_update() -> CmdResult<UpdateCheck> {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let url = format!("https://github.com/{UPDATE_REPO}/releases/latest");
+
+    let client = dpt_core::reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::new("network", e.to_string()))?;
+    let resp = client
+        .get(format!(
+            "https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
+        ))
+        .header("User-Agent", format!("digital-paper-companion/{current}"))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| AppError::new("network", e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(AppError::new(
+            "update_check",
+            format!("release query failed (HTTP {})", resp.status().as_u16()),
+        ));
+    }
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::new("network", e.to_string()))?;
+
+    let latest = body["tag_name"]
+        .as_str()
+        .map(|t| t.trim_start_matches('v').to_string());
+    let url = body["html_url"].as_str().map(str::to_string).unwrap_or(url);
+    let update_available = latest
+        .as_deref()
+        .is_some_and(|l| version_is_newer(l, &current));
+    Ok(UpdateCheck {
+        current,
+        latest,
+        url,
+        update_available,
+    })
+}
+
+/// `true` if `candidate` is newer than `current`. Versions are
+/// `major.minor.patch` with an optional numeric pre-release suffix
+/// (`0.3.0-1`, the WiX-compatible scheme used by this project); a
+/// pre-release precedes its release.
+fn version_is_newer(candidate: &str, current: &str) -> bool {
+    fn parse(v: &str) -> (Vec<u64>, Option<u64>) {
+        let (main, pre) = match v.split_once('-') {
+            Some((m, p)) => (m, Some(p.parse().unwrap_or(0))),
+            None => (v, None),
+        };
+        let parts = main
+            .split('.')
+            .map(|p| p.trim().parse().unwrap_or(0))
+            .collect();
+        (parts, pre)
+    }
+    let (main_a, pre_a) = parse(candidate);
+    let (main_b, pre_b) = parse(current);
+    for i in 0..main_a.len().max(main_b.len()) {
+        let a = main_a.get(i).copied().unwrap_or(0);
+        let b = main_b.get(i).copied().unwrap_or(0);
+        if a != b {
+            return a > b;
+        }
+    }
+    match (pre_a, pre_b) {
+        // Same main version: the release is newer than any pre-release.
+        (None, Some(_)) => true,
+        (Some(a), Some(b)) => a > b,
+        _ => false,
+    }
+}
+
 // ---- discovery & connection -------------------------------------------------
 
 #[tauri::command]
@@ -1195,4 +1298,27 @@ pub fn sync_history(state: S<'_>, id: String) -> Vec<serde_json::Value> {
 #[tauri::command]
 pub fn sync_status(state: S<'_>) -> SyncStatusPayload {
     state.sync.status()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_is_newer;
+
+    #[test]
+    fn version_comparison() {
+        assert!(version_is_newer("0.4.0", "0.3.0-1"));
+        assert!(version_is_newer("0.3.1", "0.3.0"));
+        assert!(version_is_newer("1.0.0", "0.9.9"));
+        // A release is newer than its own pre-release …
+        assert!(version_is_newer("0.3.0", "0.3.0-1"));
+        // … and pre-releases order numerically.
+        assert!(version_is_newer("0.3.0-2", "0.3.0-1"));
+
+        assert!(!version_is_newer("0.3.0", "0.3.0"));
+        assert!(!version_is_newer("0.3.0-1", "0.3.0-1"));
+        assert!(!version_is_newer("0.3.0-1", "0.3.0"));
+        assert!(!version_is_newer("0.2.9", "0.3.0"));
+        // Padding: "0.4" == "0.4.0".
+        assert!(!version_is_newer("0.4", "0.4.0"));
+    }
 }

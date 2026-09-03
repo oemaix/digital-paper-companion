@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import Dialog from "./Dialog";
 import SyncSettings from "./SyncSettings";
 import IconButton from "./IconButton";
@@ -270,6 +271,10 @@ function ApplicationTab() {
   const settings = useApp((s) => s.settings);
   const setTheme = useApp((s) => s.setTheme);
   const setLanguage = useApp((s) => s.setLanguage);
+  const setUpdateCheck = useApp((s) => s.setUpdateCheck);
+  const checkForUpdate = useApp((s) => s.checkForUpdate);
+  const update = useApp((s) => s.update);
+  const updateChecking = useApp((s) => s.updateChecking);
 
   return (
     <div className="flex flex-col gap-3 text-[13px]">
@@ -292,6 +297,53 @@ function ApplicationTab() {
         ]}
         onSave={(v) => void setLanguage(v)}
       />
+
+      {/* Update check (FR-APP-5): notify-only, user-disableable (NFR-SEC-4). */}
+      <div className="mt-1 border-t border-border pt-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          {t("settings.updates")}
+        </span>
+        <label className="mt-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={settings?.update_check ?? true}
+            onChange={(e) => void setUpdateCheck(e.target.checked)}
+          />
+          {t("settings.updateCheckAuto")}
+        </label>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void checkForUpdate()}
+            disabled={updateChecking}
+            className="border border-border px-2.5 py-1 hover:border-text disabled:opacity-50"
+          >
+            {updateChecking
+              ? t("settings.updateChecking")
+              : t("settings.updateCheckNow")}
+          </button>
+          {update &&
+            (update.update_available ? (
+              <span>
+                {t("settings.updateAvailable", {
+                  version: update.latest ?? "?",
+                  current: update.current,
+                })}
+              </span>
+            ) : (
+              <span className="text-text-secondary">
+                {t("settings.updateUpToDate", { version: update.current })}
+              </span>
+            ))}
+        </div>
+        {update?.update_available && (
+          <button
+            onClick={() => void openUrl(update.url)}
+            className="mt-2 border border-accent bg-accent px-2.5 py-1 text-accent-foreground"
+          >
+            {t("settings.updateOpenPage")}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

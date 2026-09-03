@@ -61,11 +61,24 @@ mutations on both sides) shows zero data loss and correct conflict copies.
   Sony app / dptrp1 (FR-REG-6), "Forget device" (FR-REG-5).
 - German localization (NFR-I18N-1); accessibility pass (NFR-UX-4).
 
-## Phase 4 — Polish and 1.0
+## Phase 4 — Update check, performance, more languages (v0.4)
 
-- Code signing + notarization pipeline (NFR-PLT-4); update check
-  (FR-APP-5).
-- Performance hardening against NFR-PRF targets with large libraries.
+- Update check (FR-APP-5): query the latest GitHub release over HTTPS and
+  notify with a link — no auto-install; user-disableable (NFR-SEC-4).
+- Performance hardening against NFR-PRF targets with large libraries:
+  virtualized lists (NFR-PRF-2), perf test suite against the fake device.
+- Additional locales (NFR-I18N-1): French, Italian, Spanish, Japanese,
+  Traditional and Simplified Chinese; Arabic and Hebrew including an
+  RTL layout pass.
+
+Releases stay unsigned (NFR-PLT-4 deferred, see Post-1.0); the README
+documents the first-launch steps on Windows and macOS.
+
+**Exit:** v0.4 — update notifications work end-to-end; NFR-PRF targets
+hold with a 10 000-entry library; all locales ship complete.
+
+## Phase 5 — Polish and 1.0
+
 - Onboarding refinements from user feedback; empty-state and error-copy
   review.
 - Documentation for end users (in-app help + website/README).
@@ -74,6 +87,10 @@ mutations on both sides) shows zero data loss and correct conflict copies.
 
 ## Post-1.0 candidates (unscheduled)
 
+- Code signing + notarization (NFR-PLT-4): revisit if the project gains
+  traction — SignPath (free for open source) for Windows, Apple Developer
+  ID (99 USD/year) for macOS. Until then builds ship unsigned with
+  documented first-launch steps.
 - Template thumbnails; in-app PDF preview pane.
 - CLI companion built on `dpt-core`; headless sync daemon mode.
 - Fujitsu Quaderno-specific quirks/testing as hardware becomes available.

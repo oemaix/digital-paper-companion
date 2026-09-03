@@ -42,7 +42,22 @@ Device status:
 | Multiple devices, switch from the sidebar                    | Implemented |
 | Credential import from Sony's app / `dptrp1`                 | Implemented |
 | English and German UI                                        | Implemented |
-| Automatic Update Check                                       | Planned     |
+| Automatic Update Check                                       | Implemented |
+
+## Installing unsigned builds
+
+The installers are **not code-signed** (this is a hobby project — see
+[docs/08-roadmap.md](docs/08-roadmap.md), Post-1.0). The app is open
+source and built by [CI](.github/workflows/release.yml); the OS warning
+only means no certificate was purchased. One-time steps on first launch:
+
+- **Windows**: SmartScreen shows *"Windows protected your PC"* — click
+  **More info → Run anyway**.
+- **macOS**: the app is blocked as unverified. Open **System Settings →
+  Privacy & Security**, scroll down and click **Open Anyway** (macOS 15+;
+  on older versions right-click the app → **Open**). Alternatively:
+  `xattr -d com.apple.quarantine "/Applications/Digital Paper Companion.app"`.
+- **Linux**: no signing expected; nothing to do.
 
 ## Connecting over USB or Bluetooth
 
