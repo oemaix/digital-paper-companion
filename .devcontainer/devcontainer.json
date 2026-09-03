@@ -4,7 +4,7 @@
   "service": "dev",
   "workspaceFolder": "/workspace",
   "remoteUser": "root",
-  "postCreateCommand": "npm install",
+  "postCreateCommand": "npm install && (gh auth setup-git 2>/dev/null || true)",
   "customizations": {
     "vscode": {
       "extensions": [

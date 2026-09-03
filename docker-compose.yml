@@ -43,6 +43,11 @@ services:
       - cargo-registry:/usr/local/cargo/registry
       - target:/workspace/target
       - node-modules:/workspace/node_modules
+      # GitHub CLI auth (`gh auth login`) survives container rebuilds; git
+      # uses it via `gh auth setup-git` (devcontainer postCreateCommand).
+      # Note: covers the default root user; with DPC_CONTAINER_USER=dev
+      # log in again inside the container (config lives under /home/dev).
+      - gh-config:/root/.config/gh
       # X11 socket for running the Tauri window from inside the container
       # (requires `xhost +local:` on the host, or a forwarded XAUTHORITY
       # cookie; see README).
@@ -58,3 +63,4 @@ volumes:
   cargo-registry:
   target:
   node-modules:
+  gh-config:
