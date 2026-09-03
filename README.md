@@ -96,13 +96,22 @@ docker compose run --rm dev npm run check  # lint + typecheck + tests
 docker compose run --rm dev npm run build  # release bundles
 ```
 
-GitHub access from inside the container: run `gh auth login` once
-(device flow — a one-time code you confirm in the browser; add the
-`workflow` scope via `gh auth refresh -s workflow` if you push workflow
-file changes). The login persists across rebuilds in the `gh-config`
-volume, and `gh auth setup-git` (run automatically by the dev container)
-makes `git push` use it. Cursor/VS Code's own GitHub session only covers
-the Source Control panel and integrated terminals, not other shells.
+GitHub access from inside the container — two options:
+
+- **Reuse the host's `gh` login** (recommended if you have one):
+  `export DPC_GH_CONFIG=$HOME/.config/gh` (e.g. in a `.env` file next to
+  `docker-compose.yml`), then recreate the container. Your host login is
+  bind-mounted read-write into the container.
+- **Log in inside the container**: run `gh auth login` once (device flow —
+  a one-time code you confirm in the browser). The login persists across
+  rebuilds in the `gh-config` volume. Note the volume starts empty: this
+  login is needed once after the volume is first introduced.
+
+Either way `gh auth setup-git` (run automatically by the dev container)
+makes `git push` use it. If you push changes to `.github/workflows/`,
+the token needs the `workflow` scope: `gh auth refresh -s workflow`.
+Cursor/VS Code's own GitHub session only covers the Source Control panel
+and integrated terminals, not other shells.
 
 Running the GUI (`npm run dev`) from inside the container works on X11
 and on Wayland (via XWayland). If the window fails with
