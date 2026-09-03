@@ -195,4 +195,65 @@ export const ClockIcon = makeIcon(
   </>,
 );
 
+/** Clock with an arrow into a tablet: push this computer's time to the device. */
+export const ClockToDeviceIcon = makeIcon(
+  <>
+    <circle cx="8" cy="7" r="5" />
+    <path d="M8 4.5V7l1.8 1.2" />
+    <rect width="8" height="11" x="14" y="11" />
+    <path d="M16.5 13.5h3" />
+    <path d="M8 12v3a2 2 0 0 0 2 2h1" />
+    <path d="m9 14.5 2.5 2.5-2.5 2.5" />
+  </>,
+);
+
+export const PlusIcon = makeIcon(<path d="M12 5v14M5 12h14" />);
+
+/** Closed padlock: a secured (WPA2/WPA3) Wi-Fi network. */
+export const LockIcon = makeIcon(
+  <>
+    <rect width="14" height="10" x="5" y="11" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </>,
+);
+
+/** Padlock with a dashed shackle: weak security (WEP / WPA1). */
+export const LockWeakIcon = makeIcon(
+  <>
+    <rect width="14" height="10" x="5" y="11" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" strokeDasharray="2.5 2" />
+  </>,
+);
+
+/** Open padlock: an unsecured network. */
+export const LockOpenIcon = makeIcon(
+  <>
+    <rect width="14" height="10" x="5" y="11" />
+    <path d="M8 11V6a4 4 0 0 1 7.7-1.5" />
+  </>,
+);
+
 export const SpinnerIcon = makeIcon(<path d="M21 12a9 9 0 1 1-6.22-8.56" />);
+
+/** Run now: a sharp play triangle. */
+export const PlayIcon = makeIcon(<path d="m6 4 14 8-14 8Z" />);
+
+/** Stop/cancel a running job: a sharp square. */
+export const StopIcon = makeIcon(<rect width="12" height="12" x="6" y="6" />);
+
+/** Preview/dry-run: an eye. */
+export const EyeIcon = makeIcon(
+  <>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </>,
+);
+
+/** Run history: a clock winding back. */
+export const HistoryIcon = makeIcon(
+  <>
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M12 7v5l4 2" />
+  </>,
+);

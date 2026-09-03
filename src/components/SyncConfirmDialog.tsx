@@ -47,7 +47,7 @@ export default function SyncConfirmDialog({
   const total = request.local_deletions.length + request.remote_deletions.length;
 
   return (
-    <Dialog title={t("syncConfirm.title")} onClose={() => void decide("cancel")} wide>
+    <Dialog title={t("syncConfirm.title")} onClose={() => void decide("cancel")} width="lg">
       <div className="flex flex-col gap-3 text-[13px]">
         <p>
           {t("syncConfirm.body", {

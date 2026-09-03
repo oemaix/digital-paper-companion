@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Dialog from "./Dialog";
 import SyncSettings from "./SyncSettings";
-import { ClockIcon } from "./icons";
+import IconButton from "./IconButton";
+import {
+  ClockToDeviceIcon,
+  LockIcon,
+  LockOpenIcon,
+  LockWeakIcon,
+  PencilIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+} from "./icons";
 import { useApp } from "../lib/store";
 import {
   ipc,
@@ -29,10 +39,12 @@ export default function SettingsDialog({
 }) {
   const t = useT();
   const [tab, setTab] = useState<SettingsTab>(initialTab);
+  // Incremented by the "+" in the tab row; SyncSettings opens its editor on change.
+  const [addPairRequest, setAddPairRequest] = useState(0);
 
   return (
-    <Dialog title={t("settings.title")} onClose={onClose} wide={tab !== "application"}>
-      <div className="mb-4 flex border-b border-border" role="tablist">
+    <Dialog title={t("settings.title")} onClose={onClose} width="md">
+      <div className="mb-4 flex items-center border-b border-border" role="tablist">
         {(
           [
             ["application", t("settings.tabApplication")],
@@ -54,17 +66,204 @@ export default function SettingsDialog({
             {label}
           </button>
         ))}
+        <span className="min-w-0 flex-1" />
+        {tab === "sync" && (
+          <IconButton
+            title={t("sync.addPair")}
+            onClick={() => setAddPairRequest((n) => n + 1)}
+          >
+            <PlusIcon width={14} height={14} />
+          </IconButton>
+        )}
       </div>
       {tab === "application" ? (
         <ApplicationTab />
       ) : tab === "device" ? (
         <DeviceTab />
       ) : (
-        <SyncSettings />
+        <SyncSettings addPairRequest={addPairRequest} />
       )}
     </Dialog>
   );
 }
+
+// ---- shared inline-edit building blocks -------------------------------------------
+
+/**
+ * Free-text setting: shown as a static value with a pencil icon; clicking the
+ * pencil turns it into an input that saves when it loses focus (Enter commits,
+ * Escape cancels).
+ */
+function EditableText({
+  label,
+  value,
+  saving = false,
+  mono = false,
+  onSave,
+}: {
+  label: string;
+  value: string;
+  saving?: boolean;
+  mono?: boolean;
+  onSave: (value: string) => void;
+}) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const cancelled = useRef(false);
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-44 shrink-0 text-text-secondary">{label}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          aria-label={label}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              cancelled.current = true;
+              e.currentTarget.blur();
+            }
+          }}
+          onBlur={() => {
+            setEditing(false);
+            if (!cancelled.current && draft !== value) onSave(draft);
+            cancelled.current = false;
+          }}
+          className="min-w-0 flex-1 border border-border bg-bg px-2 py-1 focus:border-text focus:outline-none"
+        />
+      ) : (
+        <>
+          <span className={`min-w-0 flex-1 truncate ${mono ? "font-mono" : ""}`}>
+            {value || "—"}
+          </span>
+          <IconButton
+            title={t("common.edit")}
+            disabled={saving}
+            onClick={() => {
+              setDraft(value);
+              setEditing(true);
+            }}
+          >
+            <PencilIcon
+              width={14}
+              height={14}
+              className={saving ? "animate-pulse" : ""}
+            />
+          </IconButton>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Enumerated setting: shown as a static value with a pencil icon; clicking the
+ * pencil turns it into a select that saves on change and closes on blur. The
+ * current device value stays selectable even when it is not a known option.
+ */
+function EditableSelect({
+  label,
+  value,
+  options,
+  saving = false,
+  onSave,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  saving?: boolean;
+  onSave: (value: string) => void;
+}) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const known = options.find((o) => o.value === value);
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-44 shrink-0 text-text-secondary">{label}</span>
+      {editing ? (
+        <select
+          autoFocus
+          value={value}
+          aria-label={label}
+          onChange={(e) => {
+            setEditing(false);
+            if (e.target.value !== value) onSave(e.target.value);
+          }}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => e.key === "Escape" && e.currentTarget.blur()}
+          className="min-w-0 flex-1 border border-border bg-bg px-2 py-1 focus:border-text focus:outline-none"
+        >
+          {!known && <option value={value}>{value || "—"}</option>}
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <>
+          <span className="min-w-0 flex-1 truncate">
+            {known?.label ?? (value || "—")}
+          </span>
+          <IconButton
+            title={t("common.edit")}
+            disabled={saving}
+            onClick={() => setEditing(true)}
+          >
+            <PencilIcon
+              width={14}
+              height={14}
+              className={saving ? "animate-pulse" : ""}
+            />
+          </IconButton>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * iOS-style on/off switch in the app's monochrome, sharp-cornered design
+ * language: a rectangular track with a sliding rectangular knob.
+ */
+function RectSwitch({
+  checked,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange: (on: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative h-4.5 w-9 shrink-0 border transition-colors disabled:opacity-40 ${
+        checked ? "border-text bg-text" : "border-border bg-bg"
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-3 w-4 transition-all ${
+          checked ? "left-4 bg-bg" : "left-0.5 bg-text-secondary"
+        }`}
+      />
+    </button>
+  );
+}
+
+// ---- application tab --------------------------------------------------------------
 
 function ApplicationTab() {
   const t = useT();
@@ -72,44 +271,36 @@ function ApplicationTab() {
   const setTheme = useApp((s) => s.setTheme);
   const setLanguage = useApp((s) => s.setLanguage);
 
-  const select =
-    "border border-border bg-bg px-2 py-1 focus:border-text focus:outline-none";
-
   return (
-    <div className="flex flex-col gap-4">
-      <label className="flex items-center justify-between gap-4">
-        <span>{t("settings.theme")}</span>
-        <select
-          value={settings?.theme ?? "system"}
-          onChange={(e) => void setTheme(e.target.value)}
-          className={select}
-        >
-          <option value="system">{t("settings.themeSystem")}</option>
-          <option value="light">{t("settings.themeLight")}</option>
-          <option value="dark">{t("settings.themeDark")}</option>
-        </select>
-      </label>
-      <label className="flex items-center justify-between gap-4">
-        <span>{t("settings.language")}</span>
-        <select
-          value={settings?.language ?? "system"}
-          onChange={(e) => void setLanguage(e.target.value)}
-          className={select}
-        >
-          <option value="system">{t("settings.languageSystem")}</option>
-          {LOCALES.map((loc) => (
-            <option key={loc} value={loc}>
-              {LOCALE_LABEL[loc]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="text-xs text-text-secondary">{t("settings.syncHint")}</p>
+    <div className="flex flex-col gap-3 text-[13px]">
+      <EditableSelect
+        label={t("settings.theme")}
+        value={settings?.theme ?? "system"}
+        options={[
+          { value: "system", label: t("settings.themeSystem") },
+          { value: "light", label: t("settings.themeLight") },
+          { value: "dark", label: t("settings.themeDark") },
+        ]}
+        onSave={(v) => void setTheme(v)}
+      />
+      <EditableSelect
+        label={t("settings.language")}
+        value={settings?.language ?? "system"}
+        options={[
+          { value: "system", label: t("settings.languageSystem") },
+          ...LOCALES.map((loc) => ({ value: loc, label: LOCALE_LABEL[loc] })),
+        ]}
+        onSave={(v) => void setLanguage(v)}
+      />
     </div>
   );
 }
 
 // ---- device tab (FR-SET-1/2/3) ---------------------------------------------------
+
+/** Shared look of the collapsible section headers in the device tab. */
+const SECTION_SUMMARY =
+  "cursor-pointer text-xs font-semibold uppercase tracking-wide text-text-secondary hover:text-text";
 
 /** Config keys with a dedicated control; everything else lands in Advanced. */
 const DEDICATED_KEYS = new Set([
@@ -124,11 +315,8 @@ const DEDICATED_KEYS = new Set([
 /** Display formats the firmware is known to accept (protocol §7.5). */
 const DATE_FORMAT_OPTIONS = ["yyyy/mm/dd", "dd/mm/yyyy", "mm/dd/yyyy"];
 
-function formatDeviceTime(iso: string | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(currentLocale());
-}
+/** Sensible standby timeouts in minutes; anything beyond 120 has no use case. */
+const STANDBY_TIMEOUT_OPTIONS = ["5", "10", "20", "30", "60", "120"];
 
 function DeviceTab() {
   const t = useT();
@@ -136,11 +324,17 @@ function DeviceTab() {
   const toast = useApp((s) => s.toast);
   const [status, setStatus] = useState<DeviceStatus | null>(null);
   const [configs, setConfigs] = useState<ConfigEntry[] | null>(null);
-  const [edited, setEdited] = useState<Record<string, string>>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [settingClock, setSettingClock] = useState(false);
+  // The host's clock, ticking (the sync button copies it to the device).
+  const [now, setNow] = useState(() => new Date());
 
   const connected = connection.state === "connected";
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!connected) return;
@@ -177,9 +371,6 @@ function DeviceTab() {
   }
 
   const byKey = new Map((configs ?? []).map((c) => [c.key, c.value]));
-  const valueOf = (key: string) => edited[key] ?? byKey.get(key) ?? "";
-  const isDirty = (key: string) =>
-    edited[key] !== undefined && edited[key] !== byKey.get(key);
   const advanced = (configs ?? []).filter((c) => !DEDICATED_KEYS.has(c.key));
 
   const saveValue = async (key: string, value: string) => {
@@ -189,11 +380,6 @@ function DeviceTab() {
       setConfigs(
         (prev) => prev?.map((c) => (c.key === key ? { ...c, value } : c)) ?? prev,
       );
-      setEdited((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
       toast(t("device.configSaved", { key }));
     } catch (err) {
       toast(errorMessage(err), "error");
@@ -201,14 +387,13 @@ function DeviceTab() {
       setSavingKey(null);
     }
   };
-  const saveKey = (key: string) => saveValue(key, valueOf(key));
 
   const setClock = async () => {
     setSettingClock(true);
     try {
       await ipc.setDeviceClock();
       toast(t("device.clockSet"));
-      refreshConfigs(); // the shown device time changed
+      refreshConfigs(); // the device time changed
     } catch (err) {
       toast(errorMessage(err), "error");
     } finally {
@@ -216,60 +401,30 @@ function DeviceTab() {
     }
   };
 
-  /** Free-text config value with an explicit save button. */
-  const editableRow = (key: string, label: string) => (
-    <div key={key} className="flex items-center gap-2">
-      <label htmlFor={`cfg-${key}`} className="w-44 shrink-0 text-text-secondary">
-        {label}
-      </label>
-      <input
-        id={`cfg-${key}`}
-        value={valueOf(key)}
-        onChange={(e) => setEdited((prev) => ({ ...prev, [key]: e.target.value }))}
-        onKeyDown={(e) => e.key === "Enter" && isDirty(key) && void saveKey(key)}
-        className="min-w-0 flex-1 border border-border bg-bg px-2 py-1 focus:border-text focus:outline-none"
-      />
-      <button
-        onClick={() => void saveKey(key)}
-        disabled={!isDirty(key) || savingKey === key}
-        className="border border-border px-2 py-1 text-xs hover:border-text disabled:opacity-40"
-      >
-        {savingKey === key ? t("common.saving") : t("common.save")}
-      </button>
-    </div>
+  const configText = (key: string, label: string) => (
+    <EditableText
+      key={key}
+      label={label}
+      value={byKey.get(key) ?? ""}
+      saving={savingKey === key}
+      onSave={(v) => void saveValue(key, v)}
+    />
   );
 
-  /** Enumerated config value; saves immediately on change. The current
-   *  device value is kept selectable even when it is not a known option. */
-  const selectRow = (
+  const configSelect = (
     key: string,
     label: string,
     options: { value: string; label: string }[],
-  ) => {
-    const current = byKey.get(key) ?? "";
-    const known = options.some((o) => o.value === current);
-    return (
-      <div key={key} className="flex items-center gap-2">
-        <label htmlFor={`cfg-${key}`} className="w-44 shrink-0 text-text-secondary">
-          {label}
-        </label>
-        <select
-          id={`cfg-${key}`}
-          value={current}
-          disabled={savingKey === key || configs === null}
-          onChange={(e) => void saveValue(key, e.target.value)}
-          className="min-w-0 flex-1 border border-border bg-bg px-2 py-1 focus:border-text focus:outline-none disabled:opacity-50"
-        >
-          {!known && <option value={current}>{current || "—"}</option>}
-          {options.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  };
+  ) => (
+    <EditableSelect
+      key={key}
+      label={label}
+      value={byKey.get(key) ?? ""}
+      options={options}
+      saving={savingKey === key}
+      onSave={(v) => void saveValue(key, v)}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-4 text-[13px]">
@@ -277,82 +432,88 @@ function DeviceTab() {
         <p className="text-text-secondary">{t("device.loadingStatus")}</p>
       )}
 
-      {/* Basic: owner + hardware facts (FR-SET-1/2) */}
-      {byKey.has("owner") && editableRow("owner", t("device.owner"))}
-      {status && (
-        <dl className="grid grid-cols-[11rem_1fr] gap-x-2 gap-y-1.5">
-          <dt className="text-text-secondary">{t("device.device")}</dt>
-          <dd>{status.model ?? connection.name ?? "Digital Paper"}</dd>
-          <dt className="text-text-secondary">{t("device.serial")}</dt>
-          <dd className="tabular-nums">{status.serial}</dd>
-          <dt className="text-text-secondary">{t("device.firmware")}</dt>
-          <dd className="tabular-nums">{status.firmware ?? "—"}</dd>
-          <dt className="text-text-secondary">{t("device.mac")}</dt>
-          <dd className="tabular-nums">{status.mac_address ?? "—"}</dd>
-          <dt className="text-text-secondary">{t("device.battery")}</dt>
-          <dd className="tabular-nums">
-            {status.battery.level != null ? `${status.battery.level} %` : "—"}
-            {status.battery.plugged === "connected" ? t("device.charging") : ""}
-          </dd>
-          <dt className="text-text-secondary">{t("device.storage")}</dt>
-          <dd className="tabular-nums">
-            {t("device.storageUsed", {
-              used: formatBytes(
-                (status.storage.capacity ?? 0) - (status.storage.available ?? 0),
-              ),
-              total: formatBytes(status.storage.capacity),
-            })}
-          </dd>
-        </dl>
-      )}
-      {byKey.has("timeout_to_standby") &&
-        editableRow("timeout_to_standby", t("device.standbyTimeout"))}
+      {/* Basic: owner + hardware facts (FR-SET-1/2). One container with a
+          uniform row gap; the dl uses the same 11rem (= w-44) label column
+          and a 22px row rhythm matching the icon-button rows around it. */}
+      <div className="flex flex-col gap-1.5">
+        {byKey.has("owner") && configText("owner", t("device.owner"))}
+        {status && (
+          <dl className="grid grid-cols-[11rem_1fr] gap-x-2 gap-y-1.5 leading-[22px]">
+            <dt className="text-text-secondary">{t("device.device")}</dt>
+            <dd>{status.model ?? connection.name ?? "Digital Paper"}</dd>
+            <dt className="text-text-secondary">{t("device.serial")}</dt>
+            <dd className="tabular-nums">{status.serial}</dd>
+            <dt className="text-text-secondary">{t("device.firmware")}</dt>
+            <dd className="tabular-nums">{status.firmware ?? "—"}</dd>
+            <dt className="text-text-secondary">{t("device.mac")}</dt>
+            <dd className="tabular-nums">{status.mac_address ?? "—"}</dd>
+            <dt className="text-text-secondary">{t("device.battery")}</dt>
+            <dd className="tabular-nums">
+              {status.battery.level != null ? `${status.battery.level} %` : "—"}
+              {status.battery.plugged === "connected" ? t("device.charging") : ""}
+            </dd>
+            <dt className="text-text-secondary">{t("device.storage")}</dt>
+            <dd className="tabular-nums">
+              {t("device.storageUsed", {
+                used: formatBytes(
+                  (status.storage.capacity ?? 0) - (status.storage.available ?? 0),
+                ),
+                total: formatBytes(status.storage.capacity),
+              })}
+            </dd>
+          </dl>
+        )}
+        {byKey.has("timeout_to_standby") &&
+          configSelect(
+            "timeout_to_standby",
+            t("device.standbyTimeout"),
+            STANDBY_TIMEOUT_OPTIONS.map((m) => ({ value: m, label: m })),
+          )}
+      </div>
 
-      {/* Date & time (FR-SET-3) */}
+      {/* Date & time (FR-SET-3), collapsed by default — not needed day to day */}
       {configs !== null && (
         <section className="border-t border-border pt-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-            {t("device.dateTime")}
-          </h3>
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <span className="w-44 shrink-0 text-text-secondary">
-                {t("device.currentTime")}
-              </span>
-              <span className="min-w-0 flex-1 tabular-nums">
-                {formatDeviceTime(byKey.get("datetime"))}
-              </span>
-              <button
-                title={t("device.setClock")}
-                aria-label={t("device.setClock")}
-                disabled={settingClock}
-                onClick={() => void setClock()}
-                className="border border-border p-1 text-text-secondary hover:border-text hover:text-text disabled:opacity-40"
-              >
-                <ClockIcon
-                  width={14}
-                  height={14}
-                  className={settingClock ? "animate-pulse" : ""}
-                />
-              </button>
+          <details>
+            <summary className={SECTION_SUMMARY}>{t("device.dateTime")}</summary>
+            <div className="mt-2 flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="w-44 shrink-0 text-text-secondary">
+                  {t("device.currentTime")}
+                </span>
+                <span className="min-w-0 flex-1 tabular-nums">
+                  {now.toLocaleString(currentLocale())}
+                </span>
+                <IconButton
+                  title={t("device.setClock")}
+                  disabled={settingClock}
+                  onClick={() => void setClock()}
+                >
+                  <ClockToDeviceIcon
+                    width={16}
+                    height={16}
+                    className={settingClock ? "animate-pulse" : ""}
+                  />
+                </IconButton>
+              </div>
+              {timezones.length > 0
+                ? configSelect(
+                    "timezone",
+                    t("device.timezone"),
+                    timezones.map((z) => ({ value: z, label: z })),
+                  )
+                : byKey.has("timezone") && configText("timezone", t("device.timezone"))}
+              {configSelect(
+                "date_format",
+                t("device.dateFormat"),
+                DATE_FORMAT_OPTIONS.map((f) => ({ value: f, label: f })),
+              )}
+              {configSelect("time_format", t("device.timeFormat"), [
+                { value: "12hour", label: t("device.timeFormat12") },
+                { value: "24hour", label: t("device.timeFormat24") },
+              ])}
             </div>
-            {timezones.length > 0
-              ? selectRow(
-                  "timezone",
-                  t("device.timezone"),
-                  timezones.map((z) => ({ value: z, label: z })),
-                )
-              : byKey.has("timezone") && editableRow("timezone", t("device.timezone"))}
-            {selectRow(
-              "date_format",
-              t("device.dateFormat"),
-              DATE_FORMAT_OPTIONS.map((f) => ({ value: f, label: f })),
-            )}
-            {selectRow("time_format", t("device.timeFormat"), [
-              { value: "12hour", label: t("device.timeFormat12") },
-              { value: "24hour", label: t("device.timeFormat24") },
-            ])}
-          </div>
+          </details>
         </section>
       )}
 
@@ -362,7 +523,7 @@ function DeviceTab() {
       {advanced.length > 0 && (
         <section className="border-t border-border pt-3">
           <details>
-            <summary className="cursor-pointer text-[13px] text-text-secondary hover:text-text">
+            <summary className={SECTION_SUMMARY}>
               {t("device.advanced")} ({advanced.length})
             </summary>
             <p className="mb-2 mt-1 text-xs text-text-secondary">
@@ -384,11 +545,8 @@ function DeviceTab() {
                 <AdvancedRow
                   key={c.key}
                   entry={c}
-                  value={valueOf(c.key)}
-                  dirty={isDirty(c.key)}
                   saving={savingKey === c.key}
-                  onChange={(v) => setEdited((prev) => ({ ...prev, [c.key]: v }))}
-                  onSave={() => void saveKey(c.key)}
+                  onSave={(v) => void saveValue(c.key, v)}
                 />
               ))}
             </div>
@@ -399,46 +557,98 @@ function DeviceTab() {
   );
 }
 
+/** One advanced key/value row with the same pencil → edit → save-on-blur flow. */
 function AdvancedRow({
   entry,
-  value,
-  dirty,
   saving,
-  onChange,
   onSave,
 }: {
   entry: ConfigEntry;
-  value: string;
-  dirty: boolean;
   saving: boolean;
-  onChange: (v: string) => void;
-  onSave: () => void;
+  onSave: (value: string) => void;
 }) {
   const t = useT();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const cancelled = useRef(false);
+
   return (
     <>
       <span className="truncate font-mono" title={entry.key}>
         {entry.key}
       </span>
-      <input
-        value={value}
-        aria-label={entry.key}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && dirty && onSave()}
-        className="min-w-0 border border-border bg-bg px-1.5 py-0.5 font-mono focus:border-text focus:outline-none"
-      />
-      <button
-        onClick={onSave}
-        disabled={!dirty || saving}
-        className="border border-border px-1.5 py-0.5 hover:border-text disabled:opacity-40"
-      >
-        {saving ? t("common.saving") : t("common.save")}
-      </button>
+      {editing ? (
+        <>
+          <input
+            autoFocus
+            value={draft}
+            aria-label={entry.key}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                cancelled.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            onBlur={() => {
+              setEditing(false);
+              if (!cancelled.current && draft !== entry.value) onSave(draft);
+              cancelled.current = false;
+            }}
+            className="min-w-0 border border-border bg-bg px-1.5 py-0.5 font-mono focus:border-text focus:outline-none"
+          />
+          <span />
+        </>
+      ) : (
+        <>
+          <span className="truncate font-mono">{entry.value || "—"}</span>
+          <IconButton
+            title={t("common.edit")}
+            disabled={saving}
+            onClick={() => {
+              setDraft(entry.value);
+              setEditing(true);
+            }}
+          >
+            <PencilIcon
+              width={12}
+              height={12}
+              className={saving ? "animate-pulse" : ""}
+            />
+          </IconButton>
+        </>
+      )}
     </>
   );
 }
 
 // ---- Wi-Fi (FR-SET-4) -----------------------------------------------------------
+
+/** Rough security classification of a network for the lock icon. */
+function securityLevel(security: string): "secured" | "weak" | "open" {
+  const s = security.toLowerCase();
+  if (!s || /none|open|nonsec/.test(s)) return "open";
+  if (/wep|wpa[^23]|wpa$/.test(s)) return "weak";
+  return "secured"; // WPA2/WPA3/PSK/EAP…
+}
+
+/** Small lock icon indicating how a network is secured, with a tooltip. */
+function SecurityBadge({ security }: { security: string }) {
+  const t = useT();
+  const level = securityLevel(security);
+  const [Icon, title] =
+    level === "open"
+      ? ([LockOpenIcon, t("wifi.unsecured")] as const)
+      : level === "weak"
+        ? ([LockWeakIcon, t("wifi.weaklySecured", { security })] as const)
+        : ([LockIcon, t("wifi.secured", { security })] as const);
+  return (
+    <span title={title} className="shrink-0 text-text-secondary">
+      <Icon width={13} height={13} aria-label={title} />
+    </span>
+  );
+}
 
 function WifiSection() {
   const t = useT();
@@ -496,99 +706,100 @@ function WifiSection() {
     }
   };
 
-  const btn =
-    "border border-border px-2 py-1 text-xs hover:border-text disabled:opacity-40";
+  // One combined list: stored networks first, then scan results that are
+  // not stored yet (visible-only rows are dimmed and get an add action).
+  const networks: { ap: AccessPoint; isStored: boolean }[] = (stored ?? []).map((ap) => ({
+    ap,
+    isStored: true,
+  }));
+  {
+    const knownSsids = new Set(networks.map((n) => n.ap.ssid));
+    for (const ap of visible ?? []) {
+      if (!knownSsids.has(ap.ssid)) {
+        networks.push({ ap, isStored: false });
+        knownSsids.add(ap.ssid);
+      }
+    }
+  }
 
   return (
-    <section className="border-t border-border pt-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-secondary">
-        {t("wifi.title")}
-      </h3>
+    <section className="border-t border-border pt-3 text-[13px]">
+      <details>
+        <summary className={SECTION_SUMMARY}>{t("wifi.title")}</summary>
 
-      <div className="flex items-center justify-between gap-4 text-[13px]">
-        <span>{t("wifi.radio")}</span>
-        <select
-          value={enabled == null ? "" : enabled ? "on" : "off"}
-          disabled={enabled == null}
-          onChange={(e) => void toggleRadio(e.target.value === "on")}
-          aria-label={t("wifi.radio")}
-          className="border border-border bg-bg px-2 py-1 focus:border-text focus:outline-none"
-        >
-          {enabled == null && <option value="">—</option>}
-          <option value="on">{t("wifi.on")}</option>
-          <option value="off">{t("wifi.off")}</option>
-        </select>
-      </div>
+        {/* pr-1 lines the switch up with the pencil icons (their p-1 inset). */}
+        <div className="mt-2 flex items-center gap-2 pr-1">
+          <span className="w-44 shrink-0 text-text-secondary">{t("wifi.radio")}</span>
+          <span className="min-w-0 flex-1" />
+          <RectSwitch
+            checked={enabled === true}
+            disabled={enabled == null}
+            label={t("wifi.radio")}
+            onChange={(on) => void toggleRadio(on)}
+          />
+        </div>
 
-      <div className="mt-3 text-[13px]">
-        <h4 className="mb-1 text-xs text-text-secondary">{t("wifi.storedNetworks")}</h4>
-        {stored == null || stored.length === 0 ? (
-          <p className="text-xs text-text-secondary">{t("wifi.noStored")}</p>
+        <div className="mt-3 flex items-center gap-1">
+          <span className="text-text-secondary">{t("wifi.networks")}</span>
+          <span className="min-w-0 flex-1" />
+          <IconButton
+            title={scanning ? t("wifi.scanning") : t("wifi.scan")}
+            disabled={scanning}
+            onClick={() => void scan()}
+          >
+            <SearchIcon
+              width={14}
+              height={14}
+              className={scanning ? "animate-pulse" : ""}
+            />
+          </IconButton>
+          <IconButton title={t("wifi.joinTitle")} onClick={() => setJoining("manual")}>
+            <PlusIcon width={14} height={14} />
+          </IconButton>
+        </div>
+
+        {networks.length === 0 ? (
+          <p className="mt-1 text-xs text-text-secondary">
+            {visible !== null ? t("wifi.noneVisible") : t("wifi.noStored")}
+          </p>
         ) : (
-          <ul className="border border-border">
-            {stored.map((ap) => (
+          <ul className="mt-1">
+            {networks.map(({ ap, isStored }, i) => (
               <li
-                key={`${ap.ssid}/${ap.security}`}
-                className="flex items-center gap-2 border-b border-border px-2 py-1.5 last:border-b-0"
+                key={`${ap.ssid}/${ap.security}/${i}`}
+                className={`flex items-center gap-2 py-0.5 ${
+                  isStored ? "" : "text-text-secondary"
+                }`}
               >
-                <span className="min-w-0 flex-1 truncate" title={ap.ssid}>
+                <SecurityBadge security={ap.security} />
+                <span className="min-w-0 flex-1 truncate font-mono" title={ap.ssid}>
                   {ap.ssid}
                 </span>
-                <span className="text-xs text-text-secondary">{ap.security}</span>
-                <button onClick={() => void remove(ap)} className={btn}>
-                  {t("common.remove")}
-                </button>
+                {isStored ? (
+                  <IconButton title={t("common.remove")} onClick={() => void remove(ap)}>
+                    <TrashIcon width={14} height={14} />
+                  </IconButton>
+                ) : (
+                  <IconButton title={t("wifi.join")} onClick={() => setJoining(ap)}>
+                    <PlusIcon width={14} height={14} />
+                  </IconButton>
+                )}
               </li>
             ))}
           </ul>
         )}
-      </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <button onClick={() => void scan()} disabled={scanning} className={btn}>
-          {scanning ? t("wifi.scanning") : t("wifi.scan")}
-        </button>
-        <button onClick={() => setJoining("manual")} className={btn}>
-          {t("wifi.joinTitle")}…
-        </button>
-      </div>
-
-      {visible && (
-        <div className="mt-2 text-[13px]">
-          <h4 className="mb-1 text-xs text-text-secondary">{t("wifi.scanResults")}</h4>
-          {visible.length === 0 ? (
-            <p className="text-xs text-text-secondary">{t("wifi.noneVisible")}</p>
-          ) : (
-            <ul className="border border-border">
-              {visible.map((ap, i) => (
-                <li
-                  key={`${ap.ssid}/${ap.security}/${i}`}
-                  className="flex items-center gap-2 border-b border-border px-2 py-1.5 last:border-b-0"
-                >
-                  <span className="min-w-0 flex-1 truncate" title={ap.ssid}>
-                    {ap.ssid}
-                  </span>
-                  <span className="text-xs text-text-secondary">{ap.security}</span>
-                  <button onClick={() => setJoining(ap)} className={btn}>
-                    {t("wifi.join")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {joining && (
-        <JoinNetworkDialog
-          preset={joining === "manual" ? null : joining}
-          onClose={() => setJoining(null)}
-          onAdded={() => {
-            setJoining(null);
-            refresh();
-          }}
-        />
-      )}
+        {joining && (
+          <JoinNetworkDialog
+            preset={joining === "manual" ? null : joining}
+            onClose={() => setJoining(null)}
+            onAdded={() => {
+              setJoining(null);
+              refresh();
+            }}
+          />
+        )}
+      </details>
     </section>
   );
 }

@@ -6,20 +6,22 @@ import Dialog from "./Dialog";
 import ContextMenu from "./ContextMenu";
 import { TemplateIcon, UploadIcon } from "./icons";
 import { useApp } from "../lib/store";
+import { useBrowse } from "../lib/browse";
 import { ipc, errorMessage, EVENTS, type NoteTemplate } from "../lib/ipc";
 import { useT } from "../lib/i18n";
 import { displayName } from "../lib/format";
 
 /**
- * Templates view (docs/05 §3.4; FR-BRW-7, FR-TRF-6): a grid of template
- * cards with add (file picker or PDF drop) and delete. Uploads run through
- * the shared transfer queue; the backend emits `templates:invalidated`
- * when one finishes.
+ * Templates view (docs/05 §3.4; FR-BRW-7, FR-TRF-6): template cards (grid)
+ * or rows (list), following the toolbar view-mode toggle, with add (file
+ * picker or PDF drop) and delete. Uploads run through the shared transfer
+ * queue; the backend emits `templates:invalidated` when one finishes.
  */
 export default function TemplatesView() {
   const t = useT();
   const toast = useApp((s) => s.toast);
   const connection = useApp((s) => s.connection);
+  const viewMode = useBrowse((s) => s.viewMode);
   const connected = connection.state === "connected";
 
   const [templates, setTemplates] = useState<NoteTemplate[] | null>(null);
@@ -117,7 +119,7 @@ export default function TemplatesView() {
         <div className="flex flex-1 items-center justify-center p-8 text-center text-text-secondary">
           {t("templates.empty")}
         </div>
-      ) : (
+      ) : viewMode === "grid" ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
             {templates.map((tpl) => (
@@ -139,6 +141,26 @@ export default function TemplatesView() {
               </button>
             ))}
           </div>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <ul>
+            {templates.map((tpl) => (
+              <li
+                key={tpl.note_template_id}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, tpl });
+                }}
+                className="flex h-9 items-center gap-2 border-b border-border px-2 text-[13px] hover:bg-surface"
+              >
+                <TemplateIcon className="shrink-0" />
+                <span className="truncate" title={tpl.template_name}>
+                  {displayName(tpl.template_name)}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

@@ -5,6 +5,15 @@ import { useT } from "../lib/i18n";
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+const WIDTH = {
+  sm: "w-[440px]",
+  md: "w-[560px]",
+  lg: "w-[720px]",
+} as const;
+
+/** Open dialogs, in stacking order — Escape only closes the topmost one. */
+const dialogStack: symbol[] = [];
+
 /**
  * Minimal modal dialog (docs/05 §3.4): sharp-cornered panel on a dimmed
  * backdrop; closes via the X button, backdrop click or Escape. Keyboard
@@ -14,18 +23,30 @@ export default function Dialog({
   title,
   onClose,
   children,
-  wide = false,
+  width = "sm",
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
-  wide?: boolean;
+  width?: keyof typeof WIDTH;
 }) {
   const t = useT();
   const panelRef = useRef<HTMLDivElement>(null);
+  const stackId = useRef<symbol>(Symbol());
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const id = stackId.current;
+    dialogStack.push(id);
+    return () => {
+      dialogStack.splice(dialogStack.indexOf(id), 1);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && dialogStack[dialogStack.length - 1] === stackId.current)
+        onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
@@ -72,7 +93,7 @@ export default function Dialog({
         aria-label={title}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`${wide ? "w-[720px]" : "w-[440px]"} max-w-[90vw] border border-border bg-bg shadow-xl`}
+        className={`${WIDTH[width]} max-w-[90vw] border border-border bg-bg shadow-xl`}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
